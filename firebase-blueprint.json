@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "School access control user profile keyed by lowercase email",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Lowercase Google account email address"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Display name of the student or admin"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "student"],
+          "description": "Access control role"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "blocked"],
+          "description": "Approval status managed by school administration"
+        },
+        "devices": {
+          "type": "array",
+          "description": "Registered browser devices for the user (max 2 for students)",
+          "maxLength": 2
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when user record was created"
+        }
+      },
+      "required": ["email", "name", "role", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userEmail}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Access control records for students and admins keyed by lowercase email"
+    }
+  }
+}

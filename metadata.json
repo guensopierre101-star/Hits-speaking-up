@@ -1,0 +1,6 @@
+{
+  "name": "Translate & Speak",
+  "description": "Mobile-first English listening and speaking practice for Haitian Creole speakers using YouTube videos and instant AI voice feedback.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,168 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: deny all access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSignedInVerified() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function authEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidEmail(val) {
+      return val is string
+        && val.size() >= 3
+        && val.size() <= 254
+        && val == val.lower()
+        && val.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+
+    function isHardcodedAdmin() {
+      return isSignedInVerified()
+        && authEmail() in ['guensopierre101@gmail.com'];
+    }
+
+    function isApprovedAdminDoc() {
+      return isSignedInVerified()
+        && exists(/databases/$(database)/documents/users/$(authEmail()))
+        && get(/databases/$(database)/documents/users/$(authEmail())).data.role == 'admin'
+        && get(/databases/$(database)/documents/users/$(authEmail())).data.status == 'approved';
+    }
+
+    function isAdmin() {
+      return isHardcodedAdmin() || isApprovedAdminDoc();
+    }
+
+    function isValidDevice(d) {
+      return d is map
+        && d.keys().hasAll(['deviceId', 'label', 'firstSeen', 'lastSeen'])
+        && d.keys().hasOnly(['deviceId', 'label', 'firstSeen', 'lastSeen'])
+        && d.deviceId is string
+        && d.deviceId.size() >= 8
+        && d.deviceId.size() <= 64
+        && d.deviceId.matches('^[a-zA-Z0-9_-]+$')
+        && d.label is string
+        && d.label.size() >= 1
+        && d.label.size() <= 60
+        && d.firstSeen is timestamp
+        && d.lastSeen is timestamp;
+    }
+
+    function isValidDevicesList(devices) {
+      return devices is list
+        && devices.size() <= 2
+        && (devices.size() < 1 || isValidDevice(devices[0]))
+        && (devices.size() < 2 || (
+          isValidDevice(devices[1])
+          && devices[1].deviceId != devices[0].deviceId
+        ));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'status', 'createdAt'])
+        && data.keys().hasOnly(['email', 'name', 'role', 'status', 'createdAt', 'devices'])
+        && isValidEmail(data.email)
+        && data.name is string
+        && data.name.size() <= 120
+        && data.role in ['admin', 'student']
+        && data.status in ['pending', 'approved', 'blocked']
+        && data.createdAt is timestamp
+        && (!('devices' in data) || isValidDevicesList(data.devices));
+    }
+
+    function existingDevicesCount() {
+      return ('devices' in existing() && existing().devices is list)
+        ? existing().devices.size()
+        : 0;
+    }
+
+    function sameDeviceIdentity(a, b) {
+      return a.deviceId == b.deviceId
+        && a.firstSeen == b.firstSeen;
+    }
+
+    function isValidStudentDeviceUpdate() {
+      return 'devices' in incoming()
+        && incoming().devices is list
+        && incoming().devices.size() >= 1
+        && incoming().devices.size() <= 2
+        && incoming().devices.size() >= existingDevicesCount()
+        && incoming().devices.size() <= existingDevicesCount() + 1
+        && (
+          (existingDevicesCount() == 0 && incoming().devices.size() == 1)
+          || (existingDevicesCount() == 1 && incoming().devices.size() == 2
+            && incoming().devices[0] == existing().devices[0])
+          || (existingDevicesCount() == 1 && incoming().devices.size() == 1
+            && sameDeviceIdentity(incoming().devices[0], existing().devices[0]))
+          || (existingDevicesCount() == 2 && incoming().devices.size() == 2 && (
+            (incoming().devices[1] == existing().devices[1]
+              && sameDeviceIdentity(incoming().devices[0], existing().devices[0]))
+            || (incoming().devices[0] == existing().devices[0]
+              && sameDeviceIdentity(incoming().devices[1], existing().devices[1]))
+          ))
+        );
+    }
+
+    match /users/{userEmail} {
+      allow get: if isSignedInVerified()
+        && isValidEmail(userEmail)
+        && (userEmail == authEmail() || isAdmin());
+
+      allow list: if isAdmin();
+
+      allow create: if isSignedInVerified()
+        && isValidEmail(userEmail)
+        && isValidUser(incoming())
+        && incoming().email == userEmail
+        && incoming().createdAt == request.time
+        && ('devices' in incoming() && incoming().devices.size() == 0)
+        && (
+          (userEmail == authEmail() && (
+            (isHardcodedAdmin() && incoming().role == 'admin' && incoming().status == 'approved')
+            || (!isHardcodedAdmin() && incoming().role == 'student' && incoming().status == 'pending')
+          ))
+          || (isAdmin() && !(userEmail in ['guensopierre101@gmail.com']) && incoming().role == 'student' && incoming().status == 'approved')
+        );
+
+      allow update: if isSignedInVerified()
+        && isValidEmail(userEmail)
+        && isValidUser(incoming())
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && (
+          (userEmail == authEmail()
+            && existing().status == 'approved'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['devices'])
+            && incoming().name == existing().name
+            && incoming().role == existing().role
+            && incoming().status == existing().status
+            && isValidStudentDeviceUpdate())
+          || (isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'devices'])
+            && (!(userEmail in ['guensopierre101@gmail.com']) || (incoming().role == 'admin' && incoming().status == 'approved')))
+        );
+
+      allow delete: if false;
+    }
+  }
+}
