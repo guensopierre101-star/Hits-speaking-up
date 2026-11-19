@@ -13,6 +13,7 @@ import {
 const LazyAdminScreen = React.lazy(() =>
   import('./components/AdminScreen').then((mod) => ({ default: mod.AdminScreen }))
 );
+import { TopicSpeakingScreen } from './components/TopicSpeakingScreen';
 import { CachedVideoSession, EvaluationResult, Segment } from './types';
 import { extractYouTubeVideoId, parsePastedTranscript } from './services/transcriptParser';
 import { analyzeVideoWindow, groupAndTranslateTranscript } from './services/gemini';
@@ -34,7 +35,7 @@ import {
   syncStudentDevice,
 } from './services/firebase';
 
-type Screen = 'home' | 'session' | 'summary' | 'admin';
+type Screen = 'home' | 'session' | 'summary' | 'admin' | 'topic-speaking';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
@@ -538,7 +539,7 @@ export default function App() {
                 onClick={() => setCurrentScreen('home')}
                 className="text-xs font-semibold text-app-text hover:text-app-primary px-2.5 sm:px-3 min-h-[36px] sm:min-h-[40px] rounded-[12px] glass-subcard hover:border-app-primary/50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                Chanje videyo
+                {currentScreen === 'topic-speaking' ? '‹ Accueil' : 'Chanje videyo'}
               </button>
             )}
 
@@ -636,9 +637,14 @@ export default function App() {
           <HomeScreen
             onStartSession={handleStartSession}
             onResumeCachedSession={handleResumeCachedSession}
+            onOpenTopicSpeaking={() => setCurrentScreen('topic-speaking')}
             isLoading={isLoading}
             loadingMessage={loadingMessage}
           />
+        )}
+
+        {currentScreen === 'topic-speaking' && (
+          <TopicSpeakingScreen onBackToHome={() => setCurrentScreen('home')} />
         )}
 
         {currentScreen === 'session' && currentSession && (
