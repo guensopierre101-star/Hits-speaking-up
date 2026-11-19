@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, Suspense } from 'react';
+import { AppLauncherScreen } from './components/AppLauncherScreen';
 import { HomeScreen } from './components/HomeScreen';
 import { SessionScreen } from './components/SessionScreen';
 import { SummaryScreen } from './components/SummaryScreen';
@@ -35,7 +36,7 @@ import {
   syncStudentDevice,
 } from './services/firebase';
 
-type Screen = 'home' | 'session' | 'summary' | 'admin' | 'topic-speaking';
+type Screen = 'home' | 'youtube-home' | 'session' | 'summary' | 'admin' | 'topic-speaking';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
@@ -391,7 +392,7 @@ export default function App() {
     analysisRunIdRef.current += 1;
     setCurrentSession(null);
     setSessionAnswers({});
-    setCurrentScreen('home');
+    setCurrentScreen('youtube-home');
   };
 
   const userEmail = (firebaseUser?.email || '').toLowerCase();
@@ -536,10 +537,18 @@ export default function App() {
               <PWAInstallButton />
             ) : (
               <button
-                onClick={() => setCurrentScreen('home')}
+                onClick={() =>
+                  setCurrentScreen(
+                    currentScreen === 'session' || currentScreen === 'summary'
+                      ? 'youtube-home'
+                      : 'home'
+                  )
+                }
                 className="text-xs font-semibold text-app-text hover:text-app-primary px-2.5 sm:px-3 min-h-[36px] sm:min-h-[40px] rounded-[12px] glass-subcard hover:border-app-primary/50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                {currentScreen === 'topic-speaking' ? '‹ Accueil' : 'Chanje videyo'}
+                {currentScreen === 'session' || currentScreen === 'summary'
+                  ? 'Chanje videyo'
+                  : '‹ Accueil'}
               </button>
             )}
 
@@ -634,10 +643,16 @@ export default function App() {
         )}
 
         {currentScreen === 'home' && (
+          <AppLauncherScreen
+            onOpenYouTubeApp={() => setCurrentScreen('youtube-home')}
+            onOpenTopicSpeakingApp={() => setCurrentScreen('topic-speaking')}
+          />
+        )}
+
+        {currentScreen === 'youtube-home' && (
           <HomeScreen
             onStartSession={handleStartSession}
             onResumeCachedSession={handleResumeCachedSession}
-            onOpenTopicSpeaking={() => setCurrentScreen('topic-speaking')}
             isLoading={isLoading}
             loadingMessage={loadingMessage}
           />
@@ -651,7 +666,7 @@ export default function App() {
           <SessionScreen
             session={currentSession}
             onFinishSession={handleFinishSession}
-            onBackToHome={() => setCurrentScreen('home')}
+            onBackToHome={() => setCurrentScreen('youtube-home')}
             autoModeTotalWindows={autoModeTotalWindows}
             autoModeReadyWindows={autoModeReadyWindows}
           />

@@ -9,7 +9,6 @@ import {
   X,
   BookOpen,
   Trash2,
-  Mic,
 } from 'lucide-react';
 import { CachedVideoSession, Segment, StarterLesson } from '../types';
 import {
@@ -27,7 +26,6 @@ interface HomeScreenProps {
     preloadedSegments?: Segment[]
   ) => void;
   onResumeCachedSession: (session: CachedVideoSession) => void;
-  onOpenTopicSpeaking: () => void;
   isLoading: boolean;
   loadingMessage: string;
 }
@@ -35,7 +33,6 @@ interface HomeScreenProps {
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onStartSession,
   onResumeCachedSession,
-  onOpenTopicSpeaking,
   isLoading,
   loadingMessage,
 }) => {
@@ -223,31 +220,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </form>
               </div>
             </div>
-
-            {/* Topic Speaking Section Card */}
-            <button
-              type="button"
-              onClick={onOpenTopicSpeaking}
-              disabled={isLoading}
-              className="mt-3 w-full text-left px-3.5 py-3 rounded-2xl glass-subcard hover:border-app-primary/60 hover:bg-app-primary/10 transition-all flex items-center justify-between gap-3 group active:scale-[0.99] cursor-pointer"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-app-primary to-app-cta-end text-white flex items-center justify-center shrink-0 shadow-sm shadow-app-primary/30">
-                  <Mic className="w-5 h-5" />
-                </span>
-                <div className="min-w-0">
-                  <div className="text-xs sm:text-sm font-extrabold text-app-text group-hover:text-app-primary transition-colors truncate">
-                    Topic Speaking
-                  </div>
-                  <p className="text-[11px] text-app-muted truncate">
-                    3 sujets par mot · Niveaux A1–C2 · Correction orale
-                  </p>
-                </div>
-              </div>
-              <span className="w-7 h-7 rounded-full bg-app-primary/15 group-hover:bg-app-primary text-app-primary group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
-                <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-              </span>
-            </button>
           </div>
 
           {/* Right Column: Tabbed Lessons / Recent Videos */}

@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ChevronDown,
-  Clock,
   Download,
   FileAudio,
   Keyboard,
@@ -16,7 +15,6 @@ import {
   Send,
   Sparkles,
   Square,
-  Star,
   Volume2,
 } from 'lucide-react';
 import {
@@ -25,21 +23,14 @@ import {
   CEFRLevel,
   compressAudioBlobForUpload,
   evaluateTopicSpeaking,
-  FavoriteTopicEntry,
   generateSpeakingTopics,
-  getFavoriteTopics,
   getPreviousTopicsForWord,
-  getRecentWordHistory,
-  getSavedTopicEvaluationResult,
   getSavedTopicScores,
   makeTopicKey,
-  RecentWordEntry,
-  saveRecentWordHistory,
   saveTopicEvaluationResult,
   saveTopicScore,
   SpeakingTopic,
   synthesizeCompleteLessonAudio,
-  toggleFavoriteTopic,
   TopicEvaluationResult,
   TopicScores,
 } from '../services/topicSpeaking';
@@ -408,9 +399,7 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
   const [focusedTopicId, setFocusedTopicId] = useState<string | null>(null);
   const [pendingSwitchTopicId, setPendingSwitchTopicId] = useState<string | null>(null);
 
-  // Persisted history, favorites, and scores
-  const [recentHistory, setRecentHistory] = useState<RecentWordEntry[]>(() => getRecentWordHistory());
-  const [favorites, setFavorites] = useState<FavoriteTopicEntry[]>(() => getFavoriteTopics());
+  // Persisted scores
   const [savedScores, setSavedScores] = useState<Record<string, TopicScores>>(() =>
     getSavedTopicScores()
   );
@@ -521,7 +510,7 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
     setIsGenerating(true);
     try {
       const previousTopics = getPreviousTopicsForWord(cleaned);
-      const { topics: generated, provider } = await generateSpeakingTopics(
+      const { topics: generated } = await generateSpeakingTopics(
         cleaned,
         level,
         previousTopics
@@ -533,14 +522,6 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
       setPendingSwitchTopicId(null);
       setIsSearchOpen(false);
 
-      const updatedHistory = saveRecentWordHistory({
-        word: cleaned,
-        level,
-        topics: generated,
-        provider,
-      });
-      setRecentHistory(updatedHistory);
-
       setTimeout(() => scrollToElement(topicsSectionRef.current), 120);
     } catch (err: unknown) {
       setGenError(
@@ -551,74 +532,6 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
     } finally {
       setIsGenerating(false);
     }
-  };
-
-  const buildRestoredCardStates = (
-    targetWord: string,
-    targetLevel: CEFRLevel,
-    topicList: SpeakingTopic[]
-  ): Record<string, TopicCardState> => {
-    const restored: Record<string, TopicCardState> = {};
-    for (const t of topicList) {
-      const saved = getSavedTopicEvaluationResult(targetWord, targetLevel, t.title);
-      if (saved) {
-        restored[t.id] = {
-          ...DEFAULT_CARD_STATE,
-          result: saved,
-        };
-      }
-    }
-    return restored;
-  };
-
-  const handleOpenHistoryEntry = (entry: RecentWordEntry) => {
-    if (isGenerating) return;
-    if (recordingTopicId) {
-      stopRecording(false);
-    }
-    revokeAllTopicAudioUrls();
-    setWord(entry.word);
-    setActiveWord(entry.word);
-    setLevel(entry.level);
-    setTopics(entry.topics);
-    setGenError(null);
-    setCardStates(buildRestoredCardStates(entry.word, entry.level, entry.topics));
-    setFocusedTopicId(null);
-    setPendingSwitchTopicId(null);
-    setIsSearchOpen(false);
-    setTimeout(() => scrollToElement(topicsSectionRef.current), 120);
-  };
-
-  const handleOpenFavoriteEntry = (fav: FavoriteTopicEntry) => {
-    if (isGenerating) return;
-    if (recordingTopicId) {
-      stopRecording(false);
-    }
-    revokeAllTopicAudioUrls();
-    setWord(fav.word);
-    setActiveWord(fav.word);
-    setLevel(fav.level);
-    setTopics([fav.topic]);
-    setGenError(null);
-    setCardStates(buildRestoredCardStates(fav.word, fav.level, [fav.topic]));
-    setFocusedTopicId(fav.topic.id);
-    setPendingSwitchTopicId(null);
-    setIsSearchOpen(false);
-    setTimeout(() => scrollToElement(topicsSectionRef.current), 120);
-  };
-
-  const handleToggleFavorite = (topic: SpeakingTopic) => {
-    const targetWord = activeWord || word.trim();
-    if (!targetWord) return;
-    const next = toggleFavoriteTopic(targetWord, level, topic);
-    setFavorites(next);
-  };
-
-  const isTopicFavorited = (topic: SpeakingTopic): boolean => {
-    const targetWord = activeWord || word.trim();
-    if (!targetWord) return false;
-    const key = makeTopicKey(targetWord, level, topic.title);
-    return favorites.some((f) => f.key === key);
   };
 
   const getPersistedScoreForTopic = (topic: SpeakingTopic): TopicScores | null => {
@@ -1134,60 +1047,6 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
                   )}
                 </button>
               </form>
-
-              {/* Historique (Last 10 words) */}
-              {recentHistory.length > 0 && (
-                <div className="glass-panel rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-app-muted">
-                    <Clock className="w-3.5 h-3.5 text-app-primary" />
-                    <span>Récents</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {recentHistory.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        disabled={isGenerating}
-                        onClick={() => handleOpenHistoryEntry(entry)}
-                        className="px-2.5 min-h-[32px] rounded-lg bg-app-bg/45 border border-app-border/70 hover:border-app-primary/50 text-xs font-medium text-app-text inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-45 transition-colors"
-                      >
-                        <span>{entry.word}</span>
-                        <span className="text-[10px] font-bold text-app-primary">
-                          {entry.level}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Saved Favorites */}
-              {favorites.length > 0 && (
-                <div className="glass-panel rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-app-muted">
-                    <Star className="w-3.5 h-3.5 text-[#F59E0B] fill-[#F59E0B]" />
-                    <span>Favoris</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {favorites.slice(0, 5).map((fav) => (
-                      <button
-                        key={fav.key}
-                        type="button"
-                        disabled={isGenerating}
-                        onClick={() => handleOpenFavoriteEntry(fav)}
-                        className="w-full text-left px-3 py-2 min-h-[36px] rounded-lg bg-app-bg/45 border border-app-border/70 hover:border-app-primary/50 flex items-center justify-between gap-2 cursor-pointer disabled:opacity-45 transition-colors"
-                      >
-                        <span className="text-xs font-semibold text-app-text truncate">
-                          {fav.topic.title}
-                        </span>
-                        <span className="text-[10px] font-semibold text-app-primary shrink-0">
-                          {fav.word} · {fav.level}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1224,7 +1083,6 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
               const card = cardStates[topic.id] || DEFAULT_CARD_STATE;
               const isRecordingThis = recordingTopicId === topic.id;
               const isCollapsed = focusedTopicId !== null && focusedTopicId !== topic.id;
-              const isFav = isTopicFavorited(topic);
               const persistedScore = getPersistedScoreForTopic(topic);
 
               if (isCollapsed) {
@@ -1268,25 +1126,6 @@ export const TopicSpeakingScreen: React.FC<TopicSpeakingScreenProps> = ({ onBack
                             Dernier score : {persistedScore.overall}/100
                           </span>
                         )}
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleFavorite(topic)}
-                          className={`p-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
-                            isFav
-                              ? 'text-[#F59E0B]'
-                              : 'text-app-muted hover:text-app-text'
-                          }`}
-                          aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                        >
-                          <Star
-                            className={`w-4 h-4 ${
-                              isFav ? 'text-[#F59E0B] fill-[#F59E0B]' : ''
-                            }`}
-                          />
-                        </button>
                       </div>
                     </div>
 
