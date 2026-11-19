@@ -15,7 +15,7 @@ const PRIMARY_MODEL = 'gemini-4-hydrogen';
 const FAST_MODEL = 'gemini-3.1-flash-lite';
 const TOPIC_SPEAKING_AUDIO_MODELS = {
   live: ['gemini-3.8-live', 'gemini-2.5-flash-native-audio-preview'],
-  tts: ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'],
+  tts: ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'],
 } as const;
 
 const TOPIC_SPEAKING_VOICE_CONFIG = {
@@ -986,7 +986,7 @@ JSON strict attendu :
 - "errors": tableau des 3 ou 4 corrections LES PLUS IMPACTANTES UNIQUEMENT issues de ce que l'étudiant a vraiment dit (trie prononciation en premier, puis grammar/vocabulary/fluency) : { "said": "mot/passage exact qu'il a vraiment dit", "correct": "version américaine correcte", "type": "pronunciation"|"grammar"|"vocabulary"|"fluency", "ipa": "IPA américain si prononciation sinon ''", "tip_fr": "explication claire et concrète en français (comment placer les sons américains ou corriger la règle/tournure)" }.
 - "upgradedExpressions": 2 à 3 améliorations de vocabulaire/phrasé adaptées à ses phrases réelles : { "basic": "expression utilisée dans son audio", "upgraded": "expression américaine plus naturelle et soutenue", "nuance_fr": "courte explication en français" }.
 - "repeatDrills": tableau de 2 à 4 mots clés et courtes phrases corrigées en anglais américain issus de ses erreurs réelles à faire répéter à voix haute immédiatement à la fin.
-- "spokenLessonScript": script oral COMPLET, direct et rythmé (entre 450 et 700 caractères, en tutoyant toujours l'élève — 'tu/ton/ta', jamais 'vous' — sans blabla inutile ni symboles IPA/markdown/numéros), prêt à être lu d'une traite : 1) constat direct sur la clarté, 2) les 3 ou 4 corrections prioritaires avec explications concrètes en français et chaque mot/phrase anglais précédé d'une courte amorce naturelle, 3) 2 expressions améliorées, 4) version corrigée complète puis consigne claire pour répéter à voix haute les "repeatDrills" avec de courtes pauses "...".`;
+- "spokenLessonScript": script oral COMPLET, direct, percutant et rythmé (entre 350 et 520 caractères, en tutoyant toujours l'élève — 'tu/ton/ta', jamais 'vous' — zéro blabla ni symboles IPA/markdown/numéros), prêt à être lu d'une traite : 1) constat direct sur la clarté, 2) les 3 ou 4 corrections prioritaires avec conseil concret en français et chaque mot/phrase anglais précédé d'une courte amorce naturelle, 3) 2 expressions améliorées, 4) phrase corrigée complète puis consigne directe pour répéter à voix haute les "repeatDrills" avec de courtes pauses "...".`;
 
       const fullEvaluatePrompt = `${basePrompt}${schemaPromptSuffix}`;
 
@@ -1007,90 +1007,95 @@ JSON strict attendu :
                 }
               : fullEvaluatePrompt;
 
+            const requestConfig: Record<string, any> = {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              thinkingConfig: getThinkingConfigForModel(modelName),
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  audioHeard: { type: Type.BOOLEAN },
+                  cleanTranscription: { type: Type.STRING },
+                  encouragementNote: { type: Type.STRING },
+                  unclearNote: { type: Type.STRING },
+                  clarityFeedback: { type: Type.STRING },
+                  correctedVersion: { type: Type.STRING },
+                  scores: {
+                    type: Type.OBJECT,
+                    properties: {
+                      pronunciation: { type: Type.NUMBER },
+                      grammar: { type: Type.NUMBER },
+                      vocabulary: { type: Type.NUMBER },
+                      fluency: { type: Type.NUMBER },
+                      overall: { type: Type.NUMBER },
+                    },
+                    required: ['pronunciation', 'grammar', 'vocabulary', 'fluency', 'overall'],
+                  },
+                  errors: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        said: { type: Type.STRING },
+                        correct: { type: Type.STRING },
+                        type: {
+                          type: Type.STRING,
+                          enum: ['pronunciation', 'grammar', 'vocabulary', 'fluency'],
+                        },
+                        ipa: { type: Type.STRING },
+                        tip_fr: { type: Type.STRING },
+                      },
+                      required: ['said', 'correct', 'type', 'ipa', 'tip_fr'],
+                    },
+                  },
+                  upgradedExpressions: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        basic: { type: Type.STRING },
+                        upgraded: { type: Type.STRING },
+                        nuance_fr: { type: Type.STRING },
+                      },
+                      required: ['basic', 'upgraded', 'nuance_fr'],
+                    },
+                  },
+                  repeatDrills: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                  },
+                  spokenLessonScript: { type: Type.STRING },
+                },
+                required: [
+                  'audioHeard',
+                  'cleanTranscription',
+                  'encouragementNote',
+                  'unclearNote',
+                  'clarityFeedback',
+                  'correctedVersion',
+                  'scores',
+                  'errors',
+                  'upgradedExpressions',
+                  'repeatDrills',
+                  'spokenLessonScript',
+                ],
+              },
+            };
+
+            if (modelName !== PRIMARY_MODEL) {
+              requestConfig.temperature = 0.2;
+            }
+
             const response = await ai.models.generateContent({
               model: modelName,
               contents,
-              config: {
-                systemInstruction,
-                temperature: 0.2,
-                responseMimeType: 'application/json',
-                thinkingConfig: getThinkingConfigForModel(modelName),
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    audioHeard: { type: Type.BOOLEAN },
-                    cleanTranscription: { type: Type.STRING },
-                    encouragementNote: { type: Type.STRING },
-                    unclearNote: { type: Type.STRING },
-                    clarityFeedback: { type: Type.STRING },
-                    correctedVersion: { type: Type.STRING },
-                    scores: {
-                      type: Type.OBJECT,
-                      properties: {
-                        pronunciation: { type: Type.NUMBER },
-                        grammar: { type: Type.NUMBER },
-                        vocabulary: { type: Type.NUMBER },
-                        fluency: { type: Type.NUMBER },
-                        overall: { type: Type.NUMBER },
-                      },
-                      required: ['pronunciation', 'grammar', 'vocabulary', 'fluency', 'overall'],
-                    },
-                    errors: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          said: { type: Type.STRING },
-                          correct: { type: Type.STRING },
-                          type: {
-                            type: Type.STRING,
-                            enum: ['pronunciation', 'grammar', 'vocabulary', 'fluency'],
-                          },
-                          ipa: { type: Type.STRING },
-                          tip_fr: { type: Type.STRING },
-                        },
-                        required: ['said', 'correct', 'type', 'ipa', 'tip_fr'],
-                      },
-                    },
-                    upgradedExpressions: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          basic: { type: Type.STRING },
-                          upgraded: { type: Type.STRING },
-                          nuance_fr: { type: Type.STRING },
-                        },
-                        required: ['basic', 'upgraded', 'nuance_fr'],
-                      },
-                    },
-                    repeatDrills: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                    },
-                    spokenLessonScript: { type: Type.STRING },
-                  },
-                  required: [
-                    'audioHeard',
-                    'cleanTranscription',
-                    'encouragementNote',
-                    'unclearNote',
-                    'clarityFeedback',
-                    'correctedVersion',
-                    'scores',
-                    'errors',
-                    'upgradedExpressions',
-                    'repeatDrills',
-                    'spokenLessonScript',
-                  ],
-                },
-              },
+              config: requestConfig,
             });
             return response.text;
           },
           (rawText) => JSON.parse(rawText),
-          processedAudioBase64 ? [PRIMARY_MODEL, FAST_MODEL] : [FAST_MODEL, PRIMARY_MODEL],
-          45000
+          [FAST_MODEL, PRIMARY_MODEL],
+          30000
         );
 
         if (
@@ -1112,6 +1117,13 @@ JSON strict attendu :
         console.log(
           `[Topic Speaking Timing] evaluate model=${result.modelUsed} analysisMs=${analysisMs}ms issuesFound=${Array.isArray(result.data?.errors) ? result.data.errors.length : 0} transcript="${transcriptPreview}"`
         );
+
+        // Pre-warm coach audio synthesis in parallel while evaluate JSON travels to browser
+        const prefetchedScript = sanitizeSpokenText(String(result.data?.spokenLessonScript || ''));
+        if (prefetchedScript.length > 20) {
+          prefetchLessonAudio(TOPIC_SPEAKING_VOICE_CONFIG.defaultVoice, prefetchedScript);
+        }
+
         res.json({ ...result.data, provider: 'Gemini', serverTiming: { analysisMs } });
         return;
       } catch (geminiErr) {
@@ -1670,7 +1682,7 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
           },
         },
       }),
-      18000,
+      12000,
       model
     );
 
@@ -1678,7 +1690,10 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     if (!base64Audio) {
       throw new Error(`No audio data returned by ${model}`);
     }
-    const wavBase64 = ensureWavFromPcmBuffer(Buffer.from(base64Audio, 'base64'), 24000);
+    // Fast-path: Gemini 3.8 TTS returns complete RIFF WAV ('UklGR' in base64); skip redundant decode/re-encode
+    const wavBase64 = base64Audio.startsWith('UklGR')
+      ? base64Audio
+      : ensureWavFromPcmBuffer(Buffer.from(base64Audio, 'base64'), 24000);
     return {
       audioBase64: wavBase64,
       modelUsed: model,
@@ -1686,14 +1701,170 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     };
   };
 
+  interface AudioSynthResult {
+    audioBase64: string;
+    modelUsed: string;
+    voiceName: string;
+  }
+
+  // Short-lived in-flight / completed TTS cache so `evaluate` pre-warms `lesson-audio` without duplicate API calls
+  const LESSON_AUDIO_PREFETCH_TTL_MS = 120000;
+  const lessonAudioPrefetchMap = new Map<
+    string,
+    { promise: Promise<AudioSynthResult>; createdAt: number }
+  >();
+
+  const makeLessonSynthKey = (voice: string, script: string): string => `${voice}::${script}`;
+
+  const pruneLessonAudioPrefetchMap = () => {
+    const now = Date.now();
+    for (const [k, entry] of lessonAudioPrefetchMap.entries()) {
+      if (now - entry.createdAt > LESSON_AUDIO_PREFETCH_TTL_MS) {
+        lessonAudioPrefetchMap.delete(k);
+      }
+    }
+    while (lessonAudioPrefetchMap.size > 20) {
+      const oldestKey = lessonAudioPrefetchMap.keys().next().value;
+      if (!oldestKey) break;
+      lessonAudioPrefetchMap.delete(oldestKey);
+    }
+  };
+
+  const runLessonAudioSynthesis = async (
+    requestedVoice: string,
+    finalScript: string
+  ): Promise<AudioSynthResult> => {
+    const liveVoiceCandidates = Array.from(
+      new Set(
+        CORE_LIVE_VOICES.has(requestedVoice)
+          ? [requestedVoice, 'Aoede', 'Zephyr']
+          : [requestedVoice, 'Aoede', 'Zephyr']
+      )
+    );
+
+    let lastErr: any = null;
+    let lastErrInfo = { status: 500, shortMsg: 'Erreur génération audio Gemini', rawMsg: '' };
+    let quotaExhausted = false;
+
+    // 1. Primary (Fast): Gemini TTS models (single fast batch request -> single WAV file)
+    for (const ttsModel of TOPIC_SPEAKING_AUDIO_MODELS.tts) {
+      try {
+        return await synthesizeLessonWithGeminiTts(ttsModel, requestedVoice, finalScript);
+      } catch (err: any) {
+        lastErr = err;
+        lastErrInfo = extractLiveErrorInfo(err);
+        console.log(
+          `[Lesson Audio] TTS model ${ttsModel} failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
+        );
+        if (lastErrInfo.status === 403) {
+          throw Object.assign(new Error('Clé API Gemini invalide ou non autorisée.'), {
+            httpStatus: 403,
+            detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+          });
+        }
+        if (lastErrInfo.status === 429) {
+          quotaExhausted = true;
+          break;
+        }
+      }
+    }
+
+    // 2. Fallback: Gemini Live native audio (if TTS failed and quota wasn't exhausted)
+    if (!quotaExhausted) {
+      for (const liveModel of TOPIC_SPEAKING_AUDIO_MODELS.live) {
+        let stopLiveLoop = false;
+
+        for (const voiceCandidate of liveVoiceCandidates) {
+          try {
+            return await synthesizeLessonWithGeminiLive(liveModel, voiceCandidate, finalScript);
+          } catch (err: any) {
+            lastErr = err;
+            lastErrInfo = extractLiveErrorInfo(err);
+            const setupSucceeded = Boolean(err?.setupSucceeded);
+            console.log(
+              `[Lesson Audio] Live model ${liveModel} (voice=${voiceCandidate}, setupOk=${setupSucceeded}) failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
+            );
+
+            if (lastErrInfo.status === 403) {
+              throw Object.assign(new Error('Clé API Gemini invalide ou non autorisée.'), {
+                httpStatus: 403,
+                detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+              });
+            }
+
+            if (lastErrInfo.status === 429) {
+              quotaExhausted = true;
+              stopLiveLoop = true;
+              break;
+            }
+
+            if (!setupSucceeded && lastErrInfo.status === 400) {
+              continue;
+            }
+
+            break;
+          }
+        }
+
+        if (stopLiveLoop) break;
+      }
+    }
+
+    const finalStatus = quotaExhausted || lastErrInfo.status === 429 ? 429 : lastErrInfo.status;
+    const finalMsg =
+      finalStatus === 429
+        ? 'Audio indisponible pour le moment (quota Gemini).'
+        : 'Impossible de générer la leçon audio pour le moment.';
+    throw Object.assign(new Error(finalMsg), {
+      httpStatus: finalStatus,
+      detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+      cause: lastErr,
+    });
+  };
+
+  function prefetchLessonAudio(voiceName: string, finalScript: string): void {
+    pruneLessonAudioPrefetchMap();
+    const key = makeLessonSynthKey(voiceName, finalScript);
+    if (lessonAudioPrefetchMap.has(key)) return;
+    const promise = runLessonAudioSynthesis(voiceName, finalScript).catch((err) => {
+      lessonAudioPrefetchMap.delete(key);
+      throw err;
+    });
+    lessonAudioPrefetchMap.set(key, { promise, createdAt: Date.now() });
+  }
+
+  const getOrRunLessonAudio = (
+    voiceName: string,
+    finalScript: string,
+    bypassCache = false
+  ): Promise<AudioSynthResult> => {
+    pruneLessonAudioPrefetchMap();
+    const key = makeLessonSynthKey(voiceName, finalScript);
+    if (bypassCache) {
+      lessonAudioPrefetchMap.delete(key);
+    } else {
+      const existing = lessonAudioPrefetchMap.get(key);
+      if (existing && Date.now() - existing.createdAt <= LESSON_AUDIO_PREFETCH_TTL_MS) {
+        return existing.promise;
+      }
+    }
+    const promise = runLessonAudioSynthesis(voiceName, finalScript).catch((err) => {
+      lessonAudioPrefetchMap.delete(key);
+      throw err;
+    });
+    lessonAudioPrefetchMap.set(key, { promise, createdAt: Date.now() });
+    return promise;
+  };
+
   /**
    * POST /api/topic-speaking/lesson-audio
    * Generates ONE continuous WAV audio lesson grouping priority errors with explanations in French
-   * and an obligatory General American English accent, prioritizing fast Gemini TTS + Live fallback.
+   * and an obligatory General American English accent, prioritizing fast Gemini TTS + prefetch overlap.
    */
   app.post('/api/topic-speaking/lesson-audio', async (req: Request, res: Response) => {
+    let finalScript = '';
     try {
-      const payload = (req.body || {}) as LessonAudioPayload;
+      const payload = (req.body || {}) as LessonAudioPayload & { forceRefresh?: boolean };
       const requestedVoice = (GEMINI_VOICES as readonly string[]).includes(payload.voiceName || '')
         ? String(payload.voiceName)
         : TOPIC_SPEAKING_VOICE_CONFIG.defaultVoice;
@@ -1709,129 +1880,49 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
       }
 
       const lessonStart = Date.now();
-      const finalScript = payload.scriptText?.trim()
+      finalScript = payload.scriptText?.trim()
         ? sanitizeSpokenText(payload.scriptText)
         : await generateConversationalLessonScript(payload);
 
-      const liveVoiceCandidates = Array.from(
-        new Set(
-          CORE_LIVE_VOICES.has(requestedVoice)
-            ? [requestedVoice, 'Aoede', 'Zephyr']
-            : [requestedVoice, 'Aoede', 'Zephyr']
-        )
+      const audioRes = await getOrRunLessonAudio(
+        requestedVoice,
+        finalScript,
+        Boolean(payload.forceRefresh)
+      );
+      const audioMs = Date.now() - lessonStart;
+      console.log(
+        `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName}`
       );
 
-      let lastErrInfo = { status: 500, shortMsg: 'Erreur génération audio Gemini', rawMsg: '' };
-      let quotaExhausted = false;
-
-      // 1. Primary (Fast): Gemini TTS models (single fast batch request -> single WAV file)
-      for (const ttsModel of TOPIC_SPEAKING_AUDIO_MODELS.tts) {
-        try {
-          const audioRes = await synthesizeLessonWithGeminiTts(
-            ttsModel,
-            requestedVoice,
-            finalScript
-          );
-          const audioMs = Date.now() - lessonStart;
-          console.log(
-            `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName}`
-          );
-          res.json({
-            audioBase64: audioRes.audioBase64,
-            mimeType: 'audio/wav',
-            scriptText: finalScript,
-            voiceName: audioRes.voiceName,
-            model: audioRes.modelUsed,
-            provider: 'Gemini',
-          });
-          return;
-        } catch (err: any) {
-          lastErrInfo = extractLiveErrorInfo(err);
-          console.log(
-            `[Lesson Audio] TTS model ${ttsModel} failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
-          );
-          if (lastErrInfo.status === 403) {
-            res.status(403).json({
-              error: 'Clé API Gemini invalide ou non autorisée.',
-              detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
-            });
-            return;
-          }
-          if (lastErrInfo.status === 429) {
-            quotaExhausted = true;
-            break;
-          }
-        }
+      // Binary WAV transport eliminates base64 +33% wire inflation and client-side atob decoding loop
+      if (req.headers.accept?.includes('audio/wav')) {
+        const wavBuffer = Buffer.from(audioRes.audioBase64, 'base64');
+        res.setHeader('Content-Type', 'audio/wav');
+        res.setHeader('Content-Length', String(wavBuffer.length));
+        res.setHeader('X-Lesson-Voice', audioRes.voiceName);
+        res.setHeader('X-Lesson-Model', audioRes.modelUsed);
+        res.setHeader('X-Lesson-Ms', String(audioMs));
+        res.status(200).send(wavBuffer);
+        return;
       }
 
-      // 2. Fallback: Gemini Live native audio (if TTS failed and quota wasn't exhausted)
-      if (!quotaExhausted) {
-        for (const liveModel of TOPIC_SPEAKING_AUDIO_MODELS.live) {
-          let stopLiveLoop = false;
-
-          for (const voiceCandidate of liveVoiceCandidates) {
-            try {
-              const audioRes = await synthesizeLessonWithGeminiLive(
-                liveModel,
-                voiceCandidate,
-                finalScript
-              );
-              const audioMs = Date.now() - lessonStart;
-              console.log(
-                `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName}`
-              );
-              res.json({
-                audioBase64: audioRes.audioBase64,
-                mimeType: 'audio/wav',
-                scriptText: finalScript,
-                voiceName: audioRes.voiceName,
-                model: audioRes.modelUsed,
-                provider: 'Gemini',
-              });
-              return;
-            } catch (err: any) {
-              lastErrInfo = extractLiveErrorInfo(err);
-              const setupSucceeded = Boolean(err?.setupSucceeded);
-              console.log(
-                `[Lesson Audio] Live model ${liveModel} (voice=${voiceCandidate}, setupOk=${setupSucceeded}) failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
-              );
-
-              if (lastErrInfo.status === 403) {
-                res.status(403).json({
-                  error: 'Clé API Gemini invalide ou non autorisée.',
-                  detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
-                });
-                return;
-              }
-
-              if (lastErrInfo.status === 429) {
-                quotaExhausted = true;
-                stopLiveLoop = true;
-                break;
-              }
-
-              if (!setupSucceeded && lastErrInfo.status === 400) {
-                continue;
-              }
-
-              break;
-            }
-          }
-
-          if (stopLiveLoop) break;
-        }
-      }
-
-      const finalStatus = quotaExhausted || lastErrInfo.status === 429 ? 429 : lastErrInfo.status;
-      res.status(finalStatus).json({
-        error:
-          finalStatus === 429
-            ? 'Audio indisponible pour le moment (quota Gemini).'
-            : 'Impossible de générer la leçon audio pour le moment.',
-        detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+      res.json({
+        audioBase64: audioRes.audioBase64,
+        mimeType: 'audio/wav',
         scriptText: finalScript,
+        voiceName: audioRes.voiceName,
+        model: audioRes.modelUsed,
+        provider: 'Gemini',
       });
-    } catch (err: unknown) {
+    } catch (err: any) {
+      if (err?.httpStatus) {
+        res.status(err.httpStatus).json({
+          error: err.message,
+          detail: err.detail,
+          scriptText: finalScript || undefined,
+        });
+        return;
+      }
       console.error('[API topic-speaking/lesson-audio Error]', err);
       const info = extractLiveErrorInfo(err);
       res.status(info.status).json({

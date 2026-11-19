@@ -714,17 +714,12 @@ export async function synthesizeCompleteLessonAudio(params: {
     }
   }
 
-  const data = await postJson<{
-    audioBase64: string;
-    mimeType?: string;
-    scriptText?: string;
-    voiceName?: string;
-    model?: string;
-  }>('/api/topic-speaking/lesson-audio', {
+  const requestBody = {
     word: params.word,
     level: params.level,
     topicTitle: params.topicTitle,
     voiceName: params.voiceName,
+    forceRefresh: Boolean(params.forceRefresh),
     scriptText: params.evaluation.spokenLessonScript || undefined,
     cleanTranscription: params.evaluation.cleanTranscription,
     encouragementNote: params.evaluation.encouragementNote,
@@ -734,16 +729,78 @@ export async function synthesizeCompleteLessonAudio(params: {
     errors: params.evaluation.errors,
     upgradedExpressions: params.evaluation.upgradedExpressions,
     repeatDrills: params.evaluation.repeatDrills,
-  });
+  };
 
-  if (!data?.audioBase64) {
-    throw new Error('Aucun audio reçu pour la leçon.');
+  let audioBlob: Blob | null = null;
+  let scriptText = params.evaluation.spokenLessonScript || '';
+  let usedVoice: string = params.voiceName;
+  let usedModel = 'gemini-3.8-flash-lite-tts';
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch('/api/topic-speaking/lesson-audio', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'audio/wav, application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+
+    if (response.ok && contentType.includes('audio/')) {
+      const blob = await response.blob();
+      if (blob.size > 44) {
+        audioBlob = blob;
+        usedVoice = response.headers.get('x-lesson-voice') || params.voiceName;
+        usedModel = response.headers.get('x-lesson-model') || usedModel;
+        break;
+      }
+      lastError = new Error('Aucun audio reçu pour la leçon.');
+      break;
+    }
+
+    const rawText = await response.text();
+    const trimmed = rawText.trim();
+    const isHtml = trimmed.startsWith('<') || trimmed.toLowerCase().startsWith('<!doctype');
+    let parsed: any = null;
+    if (!isHtml && trimmed) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (response.ok && parsed?.audioBase64) {
+      audioBlob = base64ToWavBlob(parsed.audioBase64, parsed.mimeType || 'audio/wav');
+      scriptText = parsed.scriptText || scriptText;
+      usedVoice = parsed.voiceName || params.voiceName;
+      usedModel = parsed.model || usedModel;
+      break;
+    }
+
+    const isTransient =
+      isHtml || response.status === 502 || response.status === 503 || response.status === 504;
+    if (attempt === 0 && isTransient) {
+      await new Promise((r) => setTimeout(r, 800));
+      continue;
+    }
+
+    if (parsed?.detail) {
+      lastError = new Error(String(parsed.detail));
+    } else if (parsed?.error) {
+      lastError = new Error(`${response.status} ${String(parsed.error)}`);
+    } else {
+      lastError = new Error(`${response.status || ''} Erreur lors de la préparation audio.`.trim());
+    }
   }
 
-  const audioBlob = base64ToWavBlob(data.audioBase64, data.mimeType || 'audio/wav');
-  const scriptText = data.scriptText || '';
-  const usedVoice = data.voiceName || params.voiceName;
-  const usedModel = data.model || 'gemini-live';
+  if (!audioBlob) {
+    throw lastError || new Error('Aucun audio reçu pour la leçon.');
+  }
 
   void saveCachedLessonAudio({
     key: cacheKey,
