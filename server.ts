@@ -52,6 +52,10 @@ function getThinkingLevelForModel(modelName: string): ThinkingLevel {
   return ThinkingLevel.LOW;
 }
 
+function getThinkingConfigForModel(modelName: string) {
+  return { thinkingLevel: getThinkingLevelForModel(modelName) };
+}
+
 /**
  * Custom error class preserving HTTP status codes for clean API responses.
  */
@@ -175,15 +179,15 @@ async function callGeminiWithRetry<T>(
 
         const isDailyQuota = msg.includes('PerDay') || msg.includes('RequestsPerDay');
         const isRateLimit = msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+        const isTransientBusy =
+          msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('overloaded');
 
-        // Switch immediately to next model on 404, 400, 503, timeout, or daily quota exhaustion
+        // Switch immediately to next model on 404, 400, timeout, or daily quota exhaustion
         if (
           msg.includes('404') ||
           msg.includes('NOT_FOUND') ||
           msg.includes('400') ||
           msg.includes('INVALID_ARGUMENT') ||
-          msg.includes('503') ||
-          msg.includes('UNAVAILABLE') ||
           msg.includes('Timeout') ||
           isDailyQuota
         ) {
@@ -191,7 +195,11 @@ async function callGeminiWithRetry<T>(
         }
 
         if (attempt < MAX_RETRIES_PER_MODEL) {
-          const backoff = isRateLimit ? 1500 : 300 * Math.pow(2, attempt - 1);
+          const backoff = isRateLimit
+            ? 1500
+            : isTransientBusy
+              ? 700
+              : 300 * Math.pow(2, attempt - 1);
           await delay(backoff);
         }
       }
@@ -823,9 +831,7 @@ Generate 3 brand-new, truly distinct speaking topics in JSON.`;
               config: {
                 systemInstruction,
                 responseMimeType: 'application/json',
-                thinkingConfig: {
-                  thinkingLevel: getThinkingLevelForModel(modelName),
-                },
+                thinkingConfig: getThinkingConfigForModel(modelName),
                 responseSchema: {
                   type: Type.OBJECT,
                   properties: {
@@ -855,7 +861,7 @@ Generate 3 brand-new, truly distinct speaking topics in JSON.`;
             return parsed.topics.slice(0, 3);
           },
           [FAST_MODEL, PRIMARY_MODEL],
-          25000
+          28000
         );
 
         res.json({ topics: result.data, provider: 'Gemini' });
@@ -979,7 +985,8 @@ JSON strict attendu :
 - "scores": { "pronunciation": 0-100, "grammar": 0-100, "vocabulary": 0-100, "fluency": 0-100, "overall": 0-100 }.
 - "errors": tableau des 3 ou 4 corrections LES PLUS IMPACTANTES UNIQUEMENT issues de ce que l'étudiant a vraiment dit (trie prononciation en premier, puis grammar/vocabulary/fluency) : { "said": "mot/passage exact qu'il a vraiment dit", "correct": "version américaine correcte", "type": "pronunciation"|"grammar"|"vocabulary"|"fluency", "ipa": "IPA américain si prononciation sinon ''", "tip_fr": "explication claire et concrète en français (comment placer les sons américains ou corriger la règle/tournure)" }.
 - "upgradedExpressions": 2 à 3 améliorations de vocabulaire/phrasé adaptées à ses phrases réelles : { "basic": "expression utilisée dans son audio", "upgraded": "expression américaine plus naturelle et soutenue", "nuance_fr": "courte explication en français" }.
-- "repeatDrills": tableau de 2 à 4 mots clés et courtes phrases corrigées en anglais américain issus de ses erreurs réelles à faire répéter à voix haute immédiatement à la fin.`;
+- "repeatDrills": tableau de 2 à 4 mots clés et courtes phrases corrigées en anglais américain issus de ses erreurs réelles à faire répéter à voix haute immédiatement à la fin.
+- "spokenLessonScript": script oral COMPLET, direct et rythmé (entre 450 et 700 caractères, en tutoyant toujours l'élève — 'tu/ton/ta', jamais 'vous' — sans blabla inutile ni symboles IPA/markdown/numéros), prêt à être lu d'une traite : 1) constat direct sur la clarté, 2) les 3 ou 4 corrections prioritaires avec explications concrètes en français et chaque mot/phrase anglais précédé d'une courte amorce naturelle, 3) 2 expressions améliorées, 4) version corrigée complète puis consigne claire pour répéter à voix haute les "repeatDrills" avec de courtes pauses "...".`;
 
       const fullEvaluatePrompt = `${basePrompt}${schemaPromptSuffix}`;
 
@@ -1007,10 +1014,7 @@ JSON strict attendu :
                 systemInstruction,
                 temperature: 0.2,
                 responseMimeType: 'application/json',
-                thinkingConfig: {
-                  thinkingLevel:
-                    modelName === FAST_MODEL ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW,
-                },
+                thinkingConfig: getThinkingConfigForModel(modelName),
                 responseSchema: {
                   type: Type.OBJECT,
                   properties: {
@@ -1064,6 +1068,7 @@ JSON strict attendu :
                       type: Type.ARRAY,
                       items: { type: Type.STRING },
                     },
+                    spokenLessonScript: { type: Type.STRING },
                   },
                   required: [
                     'audioHeard',
@@ -1076,6 +1081,7 @@ JSON strict attendu :
                     'errors',
                     'upgradedExpressions',
                     'repeatDrills',
+                    'spokenLessonScript',
                   ],
                 },
               },
@@ -1084,7 +1090,7 @@ JSON strict attendu :
           },
           (rawText) => JSON.parse(rawText),
           processedAudioBase64 ? [PRIMARY_MODEL, FAST_MODEL] : [FAST_MODEL, PRIMARY_MODEL],
-          60000
+          45000
         );
 
         if (
@@ -1645,15 +1651,14 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     lessonScript: string
   ): Promise<{ audioBase64: string; modelUsed: string; voiceName: string }> => {
     const ai = getGeminiClient();
-    const ttsPrompt = `Style: Warm, very human 1-on-1 American English coach speaking all explanations in natural French and every English word/sentence in an obligatory General American accent. Natural relaxed pacing, never robotic.\n\n${lessonScript}`;
-
+    // Pass ONLY the clean spoken text so TTS models never read style instructions out loud
     const response = await withTimeout(
       ai.models.generateContent({
         model,
         contents: [
           {
             role: 'user',
-            parts: [{ text: ttsPrompt }],
+            parts: [{ text: lessonScript }],
           },
         ],
         config: {
@@ -1665,7 +1670,7 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
           },
         },
       }),
-      45000,
+      18000,
       model
     );
 
@@ -1683,8 +1688,8 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
 
   /**
    * POST /api/topic-speaking/lesson-audio
-   * Generates ONE continuous WAV audio lesson grouping ALL errors with explanations in French
-   * and an obligatory General American English accent, using Gemini Live primarily + Gemini TTS fallback.
+   * Generates ONE continuous WAV audio lesson grouping priority errors with explanations in French
+   * and an obligatory General American English accent, prioritizing fast Gemini TTS + Live fallback.
    */
   app.post('/api/topic-speaking/lesson-audio', async (req: Request, res: Response) => {
     try {
@@ -1717,65 +1722,9 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
       );
 
       let lastErrInfo = { status: 500, shortMsg: 'Erreur génération audio Gemini', rawMsg: '' };
-      let liveQuotaExhausted = false;
+      let quotaExhausted = false;
 
-      // 1. Primary: Gemini Live native audio (warmest human voice, single WAV file)
-      for (const liveModel of TOPIC_SPEAKING_AUDIO_MODELS.live) {
-        let stopLiveLoop = false;
-
-        for (const voiceCandidate of liveVoiceCandidates) {
-          try {
-            const audioRes = await synthesizeLessonWithGeminiLive(
-              liveModel,
-              voiceCandidate,
-              finalScript
-            );
-            const audioMs = Date.now() - lessonStart;
-            console.log(
-              `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName}`
-            );
-            res.json({
-              audioBase64: audioRes.audioBase64,
-              mimeType: 'audio/wav',
-              scriptText: finalScript,
-              voiceName: audioRes.voiceName,
-              model: audioRes.modelUsed,
-              provider: 'Gemini',
-            });
-            return;
-          } catch (err: any) {
-            lastErrInfo = extractLiveErrorInfo(err);
-            const setupSucceeded = Boolean(err?.setupSucceeded);
-            console.log(
-              `[Lesson Audio] Live model ${liveModel} (voice=${voiceCandidate}, setupOk=${setupSucceeded}) failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
-            );
-
-            if (lastErrInfo.status === 403) {
-              res.status(403).json({
-                error: 'Clé API Gemini invalide ou non autorisée.',
-                detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
-              });
-              return;
-            }
-
-            if (lastErrInfo.status === 429) {
-              liveQuotaExhausted = true;
-              stopLiveLoop = true;
-              break;
-            }
-
-            if (!setupSucceeded && lastErrInfo.status === 400) {
-              continue;
-            }
-
-            break;
-          }
-        }
-
-        if (stopLiveLoop) break;
-      }
-
-      // 2. Fallback: Gemini TTS models (single request -> single WAV file)
+      // 1. Primary (Fast): Gemini TTS models (single fast batch request -> single WAV file)
       for (const ttsModel of TOPIC_SPEAKING_AUDIO_MODELS.tts) {
         try {
           const audioRes = await synthesizeLessonWithGeminiTts(
@@ -1801,13 +1750,79 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
           console.log(
             `[Lesson Audio] TTS model ${ttsModel} failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
           );
-          if (lastErrInfo.status === 429 || lastErrInfo.status === 403) {
+          if (lastErrInfo.status === 403) {
+            res.status(403).json({
+              error: 'Clé API Gemini invalide ou non autorisée.',
+              detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+            });
+            return;
+          }
+          if (lastErrInfo.status === 429) {
+            quotaExhausted = true;
             break;
           }
         }
       }
 
-      const finalStatus = liveQuotaExhausted || lastErrInfo.status === 429 ? 429 : lastErrInfo.status;
+      // 2. Fallback: Gemini Live native audio (if TTS failed and quota wasn't exhausted)
+      if (!quotaExhausted) {
+        for (const liveModel of TOPIC_SPEAKING_AUDIO_MODELS.live) {
+          let stopLiveLoop = false;
+
+          for (const voiceCandidate of liveVoiceCandidates) {
+            try {
+              const audioRes = await synthesizeLessonWithGeminiLive(
+                liveModel,
+                voiceCandidate,
+                finalScript
+              );
+              const audioMs = Date.now() - lessonStart;
+              console.log(
+                `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName}`
+              );
+              res.json({
+                audioBase64: audioRes.audioBase64,
+                mimeType: 'audio/wav',
+                scriptText: finalScript,
+                voiceName: audioRes.voiceName,
+                model: audioRes.modelUsed,
+                provider: 'Gemini',
+              });
+              return;
+            } catch (err: any) {
+              lastErrInfo = extractLiveErrorInfo(err);
+              const setupSucceeded = Boolean(err?.setupSucceeded);
+              console.log(
+                `[Lesson Audio] Live model ${liveModel} (voice=${voiceCandidate}, setupOk=${setupSucceeded}) failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
+              );
+
+              if (lastErrInfo.status === 403) {
+                res.status(403).json({
+                  error: 'Clé API Gemini invalide ou non autorisée.',
+                  detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+                });
+                return;
+              }
+
+              if (lastErrInfo.status === 429) {
+                quotaExhausted = true;
+                stopLiveLoop = true;
+                break;
+              }
+
+              if (!setupSucceeded && lastErrInfo.status === 400) {
+                continue;
+              }
+
+              break;
+            }
+          }
+
+          if (stopLiveLoop) break;
+        }
+      }
+
+      const finalStatus = quotaExhausted || lastErrInfo.status === 429 ? 429 : lastErrInfo.status;
       res.status(finalStatus).json({
         error:
           finalStatus === 429

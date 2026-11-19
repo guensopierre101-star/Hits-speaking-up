@@ -88,6 +88,7 @@ export interface TopicEvaluationResult {
   errors: CompactErrorItem[];
   upgradedExpressions?: UpgradedExpressionItem[];
   repeatDrills?: string[];
+  spokenLessonScript?: string;
   provider: 'Gemini' | 'Groq';
   serverAnalysisMs?: number;
 }
@@ -415,6 +416,7 @@ export async function evaluateTopicSpeaking(params: {
     errors?: Partial<CompactErrorItem>[];
     upgradedExpressions?: Partial<UpgradedExpressionItem>[];
     repeatDrills?: string[];
+    spokenLessonScript?: string;
     provider?: 'Gemini' | 'Groq';
     serverTiming?: { analysisMs?: number };
   }>('/api/topic-speaking/evaluate', params);
@@ -472,6 +474,7 @@ export async function evaluateTopicSpeaking(params: {
     errors: rawErrors.slice(0, 4),
     upgradedExpressions,
     repeatDrills,
+    spokenLessonScript: typeof data.spokenLessonScript === 'string' ? data.spokenLessonScript.trim() : '',
     provider: data.provider === 'Groq' ? 'Groq' : 'Gemini',
     serverAnalysisMs: data.serverTiming?.analysisMs,
   };
@@ -722,6 +725,7 @@ export async function synthesizeCompleteLessonAudio(params: {
     level: params.level,
     topicTitle: params.topicTitle,
     voiceName: params.voiceName,
+    scriptText: params.evaluation.spokenLessonScript || undefined,
     cleanTranscription: params.evaluation.cleanTranscription,
     encouragementNote: params.evaluation.encouragementNote,
     unclearNote: params.evaluation.unclearNote,
