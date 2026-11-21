@@ -301,16 +301,28 @@ export function saveTopicScore(
 async function postJson<T>(url: string, payload: unknown): Promise<T> {
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      lastError = new Error(
+        'Connexion au serveur interrompue (réseau instable). Vérifie ta connexion et réessaie.'
+      );
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+        continue;
+      }
+      break;
+    }
 
     const rawText = await response.text();
     const trimmed = rawText.trim();
@@ -332,8 +344,8 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
     // Retry once automatically on transient proxy/HTML/502/503/504 responses
     const isTransient =
       isHtml || response.status === 502 || response.status === 503 || response.status === 504;
-    if (attempt === 0 && isTransient) {
-      await new Promise((r) => setTimeout(r, 800));
+    if (attempt < 2 && isTransient) {
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
       continue;
     }
 
@@ -353,11 +365,13 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
       } else {
         lastError = new Error(`${response.status} Erreur serveur.`);
       }
+      break;
     } else {
       console.error(`[TopicSpeaking] Expected JSON from ${url} (status ${response.status}), got:`, trimmed.slice(0, 200));
       lastError = new Error(
         'Le serveur a renvoyé une réponse inattendue (HTML au lieu de JSON). Rechargez la page et réessayez.'
       );
+      break;
     }
   }
 
@@ -439,9 +453,7 @@ export async function evaluateTopicSpeaking(params: {
         }))
     : [];
 
-  // Sort pronunciation errors first and focus on top 4 most impactful corrections
-  const priorityOrder = { pronunciation: 0, grammar: 1, vocabulary: 2, fluency: 3 };
-  rawErrors.sort((a, b) => priorityOrder[a.type] - priorityOrder[b.type]);
+  // Preserve strict chronological order from the start of the student audio to the end (zero error cap)
 
   const upgradedExpressions: UpgradedExpressionItem[] = Array.isArray(data.upgradedExpressions)
     ? data.upgradedExpressions
@@ -455,7 +467,7 @@ export async function evaluateTopicSpeaking(params: {
     : [];
 
   const repeatDrills: string[] = Array.isArray(data.repeatDrills)
-    ? data.repeatDrills.map((d) => String(d || '').trim()).filter(Boolean).slice(0, 4)
+    ? data.repeatDrills.map((d) => String(d || '').trim()).filter(Boolean).slice(0, 10)
     : [];
 
   return {
@@ -471,7 +483,7 @@ export async function evaluateTopicSpeaking(params: {
       fluency: Math.max(0, Math.min(100, Math.round(data.scores?.fluency ?? 0))),
       overall: Math.max(0, Math.min(100, Math.round(data.scores?.overall ?? 0))),
     },
-    errors: rawErrors.slice(0, 4),
+    errors: rawErrors,
     upgradedExpressions,
     repeatDrills,
     spokenLessonScript: typeof data.spokenLessonScript === 'string' ? data.spokenLessonScript.trim() : '',
@@ -511,9 +523,9 @@ export async function compressAudioBlobForUpload(
     const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
     await ctx.close().catch(() => {});
 
-    const targetRate = 16000;
+    const targetRate = decoded.duration > 210 ? 10000 : decoded.duration > 120 ? 12000 : 16000;
     const frameCount = Math.max(1, Math.ceil(decoded.duration * targetRate));
-    // Skip WAV expansion only for very long recordings (> ~4 min / > 8 MB WAV)
+    // Skip WAV expansion only for very long recordings (> ~6 min / > 8 MB WAV)
     if (frameCount * 2 + 44 > 8 * 1024 * 1024) {
       return { blob, mimeType: originalMime };
     }
@@ -638,7 +650,7 @@ function makeLessonCacheKey(
   voiceName: AmericanVoiceId,
   evaluation: TopicEvaluationResult
 ): string {
-  const sig = `v2::${evaluation.cleanTranscription}::${evaluation.clarityFeedback || ''}::${evaluation.correctedVersion}::${evaluation.errors
+  const sig = `v5::${evaluation.cleanTranscription}::${evaluation.clarityFeedback || ''}::${evaluation.correctedVersion}::${evaluation.errors
     .map((e) => `${e.said}|${e.correct}`)
     .join(';')}::${(evaluation.upgradedExpressions || []).map((u) => u.upgraded).join(';')}`;
   let hash = 0;
@@ -737,16 +749,28 @@ export async function synthesizeCompleteLessonAudio(params: {
   let usedModel = 'gemini-3.8-flash-lite-tts';
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch('/api/topic-speaking/lesson-audio', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'audio/wav, application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch('/api/topic-speaking/lesson-audio', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'audio/wav, application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+    } catch {
+      lastError = new Error(
+        'Connexion interrompue pendant la préparation audio. Vérifie ta connexion et réessaie.'
+      );
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+        continue;
+      }
+      break;
+    }
 
     const contentType = response.headers.get('content-type') || '';
 
@@ -784,8 +808,8 @@ export async function synthesizeCompleteLessonAudio(params: {
 
     const isTransient =
       isHtml || response.status === 502 || response.status === 503 || response.status === 504;
-    if (attempt === 0 && isTransient) {
-      await new Promise((r) => setTimeout(r, 800));
+    if (attempt < 2 && isTransient) {
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
       continue;
     }
 
@@ -796,6 +820,7 @@ export async function synthesizeCompleteLessonAudio(params: {
     } else {
       lastError = new Error(`${response.status || ''} Erreur lors de la préparation audio.`.trim());
     }
+    break;
   }
 
   if (!audioBlob) {

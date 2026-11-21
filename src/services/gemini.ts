@@ -8,28 +8,49 @@ import { buildSegmentsFromGrouping } from './transcriptParser';
  */
 
 async function postJson<T>(url: string, payload: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    let errorMsg = `Server error ${response.status}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response: Response;
     try {
-      const errorData = await response.json();
-      if (errorData?.error) {
-        errorMsg = errorData.error;
-      }
+      response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
     } catch {
-      // ignore
+      lastError = new Error('Koneksyon an koupe pandan rekèt la. Tcheke entènèt ou epi eseye ankò.');
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+        continue;
+      }
+      throw lastError;
     }
-    throw new Error(errorMsg);
+
+    if (!response.ok) {
+      if (attempt < 2 && (response.status === 502 || response.status === 503 || response.status === 504)) {
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+        continue;
+      }
+      let errorMsg = `Server error ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData?.error) {
+          errorMsg = errorData.error;
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(errorMsg);
+    }
+
+    return response.json() as Promise<T>;
   }
 
-  return response.json() as Promise<T>;
+  throw lastError || new Error('Koneksyon an koupe. Eseye ankò.');
 }
 
 /**

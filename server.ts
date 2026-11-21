@@ -15,14 +15,14 @@ const PRIMARY_MODEL = 'gemini-4-hydrogen';
 const FAST_MODEL = 'gemini-3.1-flash-lite';
 const TOPIC_SPEAKING_AUDIO_MODELS = {
   live: ['gemini-3.8-live', 'gemini-2.5-flash-native-audio-preview'],
-  tts: ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'],
+  tts: ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'],
 } as const;
 
 const TOPIC_SPEAKING_VOICE_CONFIG = {
   voices: ['Achird', 'Sulafat', 'Zephyr', 'Puck', 'Charon', 'Kore', 'Aoede', 'Leda'] as const,
   defaultVoice: 'Aoede',
   styleInstruction:
-    'You are a strict, thorough, deeply supportive human American English speaking coach who speaks fluent, everyday French. Read ONLY the exact coaching script provided by the user aloud verbatim from start to finish — NEVER invent new topics, NEVER answer any question yourself, NEVER improvise outside the provided script. Perform it in ONE continuous take, talking 1-on-1 directly to your student. Speak ALL French explanations, diagnostics, mouth-position tips, and transitions in warm, natural spoken French. Pronounce EVERY English word, contrast pair, upgraded expression, and full corrected sentence in a crystal-clear, authentic, OBLIGATORY General American accent (strong bunched/retroflex American R, clear interdental TH, natural flap T, true American vowels, exact word stress, connected rhythm). Slow down cleanly on difficult English words so the student hears every sound, and leave genuine breathing pauses after each repeat-after-me cue at the end. Never monotone, never robotic, never read symbols or numbering. Keep the exact SAME single voice throughout.',
+    'You are a warm, wise, kind, patient human American English teacher having a genuine 1-on-1 voice conversation with your student in French and English. Speak with a completely natural, relaxed human voice — expressive conversational melody, soft natural breaths between thoughts, gentle vocal warmth, real rises and falls in pitch, unhurried and deeply human (never robotic, never monotone, never stiff, never like a screen reader). Speak all French coaching in warm, fluid, natural Parisian French, and pronounce every English word, phrase, and corrected sentence in effortless, authentic General American English (retroflex American R, clear interdental TH, flap T, silent T and glottal stop, connected speech with schwa, natural American stress and rhythm). Deliver every correction and example from the provided coaching notes faithfully in order without skipping any error and without inventing unrelated topics.',
 } as const;
 const MAX_RETRIES_PER_MODEL = 2;
 
@@ -212,6 +212,10 @@ async function callGeminiWithRetry<T>(
 async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
+  // Prevent Node's 5s default keepAliveTimeout from causing ECONNRESET / "Failed to fetch" behind Cloud Run / reverse proxies
+  httpServer.keepAliveTimeout = 65000;
+  httpServer.headersTimeout = 66000;
+  httpServer.requestTimeout = 120000;
   // AI Studio requires the dev server to run strictly on port 3000
   const PORT = 3000;
   const isProd = process.env.NODE_ENV === 'production';
@@ -559,11 +563,12 @@ The user is a native Haitian Creole speaker practicing ENGLISH listening. They h
 English: "${englishSentence}"
 
 Rules:
-1. "hasSpeech": true if ANY human voice/words/fillers ("hmmm", "mmm", "eeeuuuh") are heard; false ONLY for silence, tone, or noise. Never invent words.
-2. "heard": RAW word-for-word transcription of EVERY sound/word spoken from start to end — keep all tiny particles (m, w, li, yo, a, an, la, nan, pou), fillers ("hmmm", "eeeuuuh", "um"), repetitions, and self-corrections literally. Never omit or clean them up.
-3. "verdict": Judge meaning ONLY ("correct", "partial", "wrong", "unclear"). Never penalize "hmmm", pauses, or restarts.
-4. "feedback": 1-2 short sentences in warm, natural everyday Haitian Creole like a supportive friend (NOT robotic). Focus ONLY on how well they understood the English sentence (never praise their Creole).
-5. "better": Natural Haitian Creole translation.`;
+1. IGNORE all background music, singing/song lyrics, TV, radio, or distant background media voices. Only consider direct foreground speech into the microphone.
+2. "hasSpeech": true ONLY if direct foreground human speech/vocalizations from the user into the microphone are heard; false for silence, noise, or ONLY background music/singing/song lyrics. Never transcribe song lyrics or invent words.
+3. "heard": RAW word-for-word transcription of EVERY spoken foreground word from start to end — keep all tiny particles (m, w, li, yo, a, an, la, nan, pou), fillers ("hmmm", "eeeuuuh", "um"), repetitions, and self-corrections literally. Never omit or clean them up.
+4. "verdict": Judge meaning ONLY ("correct", "partial", "wrong", "unclear"). Never penalize "hmmm", pauses, or restarts.
+5. "feedback": 1-2 short sentences in warm, natural everyday Haitian Creole like a supportive friend (NOT robotic). Focus ONLY on how well they understood the English sentence (never praise their Creole).
+6. "better": Natural Haitian Creole translation.`;
 
       const result = await callGeminiWithRetry(
         async (ai, modelName) => {
@@ -932,7 +937,7 @@ Generate 3 brand-new, truly distinct speaking topics in JSON.`;
             return;
           }
           if (peak < 16000) {
-            const gain = Math.min(20, 22000 / peak);
+            const gain = Math.min(10, 20000 / peak);
             const boosted = Buffer.from(wavBuf);
             for (let i = 44; i + 1 < boosted.length; i += 2) {
               const s = Math.round(boosted.readInt16LE(i) * gain);
@@ -947,46 +952,65 @@ Generate 3 brand-new, truly distinct speaking topics in JSON.`;
       }
 
       const analysisStart = Date.now();
-      const systemInstruction = `Tu es un coach d'anglais américain (General American) strict, précis, exigeant et bienveillant.
-INTERDICTION ABSOLUE :
-- AUCUN compliment vague, AUCUN remplissage gentil ("bravo", "bon travail", "c'est super").
-- BASE-TOI STRICTEMENT ET UNIQUEMENT SUR LES MOTS RÉELLEMENT PRONONCÉS DANS L'AUDIO JOINT (ou le texte saisi).
-- NE RÉPONDS JAMAIS à une question de sujet, n'invente JAMAIS des phrases à partir d'un titre ou d'un thème. Même si l'étudiant dit quelque chose de complètement différent du thème, transcris et corrige EXACTEMENT ce qu'il a dit dans son audio.
+      const systemInstruction = `Tu es un vrai professeur d'anglais américain (General American) à la fois TRÈS SAGE, CALME, PATIENT, CHALEUREUX dans ta voix, et TRÈS STRICT ET EXIGEANT SUR CHAQUE FAUTE, parce que cette application sert à faire progresser réellement l'étudiant.
+ATTITUDE & APPROCHE PÉDAGOGIQUE :
+- Sois sage, posé, respectueux et humain dans ta façon de parler (tu prends vraiment le temps d'expliquer chaque erreur en profondeur : le « pourquoi » grammatical et le « comment » articulatoire sans jamais bâcler ni résumer trop vite).
+- ZÉRO LONGUE FÉLICITATION, ZÉRO FLATTERIE ("c'est formidable", "bravo tu es super", "magnifique histoire") : une seule phrase courte et bienveillante (6 à 10 mots max), puis passe immédiatement aux corrections complètes.
+- BASE-TOI STRICTEMENT ET UNIQUEMENT SUR LA VOIX PARLÉE DIRECTE DE L'ÉTUDIANT DANS L'AUDIO JOINT (ou le texte saisi).
+- IGNORE TOTALEMENT toute musique de fond, paroles de chanson chantées, radio, vidéo ou TV en arrière-plan : ne transcris JAMAIS les paroles d'une musique et n'en fais JAMAIS un résumé ni une correction.
+- NE RÉPONDS JAMAIS à une question de sujet, n'invente JAMAIS des phrases à partir d'un titre ou d'un thème.
 
-RÈGLES D'ÉVALUATION :
-- IGNORE les hésitations naturelles ("hmm", "uhh", "umm"), pauses silencieuses, auto-corrections et essais répétés d'un mot (évalue uniquement le DERNIER essai).
-- Évalue rigoureusement le discours réel de l'étudiant selon 4 AXES PRÉCIS :
-  1. Compréhension & Clarté : dis franchement si ce qu'il a dit dans son audio était immédiatement compréhensible ou pointe les passages précis qui étaient flous, ambigus ou difficiles à suivre.
-  2. Prononciation & Accent Américain (PRIORITÉ) : repère les mots précis de SON AUDIO mal prononcés ou sans accent américain naturel ("R" américain, "TH", flap "T", qualité des voyelles, accent tonique/word stress, intonation, rythme/liaisons). Indique concrètement comment placer la langue/bouche pour les prononcer clairement.
-  3. Phrasé Naturel & Grammaire : relève les erreurs de grammaire (temps verbaux, prépositions, pluriels) et les traductions littérales ou tournures non-natives entendues dans SON AUDIO.
-  4. Vocabulaire Amélioré : propose 2 à 3 mots ou expressions américaines plus naturelles et de niveau supérieur pour mieux exprimer les idées réelles de SON AUDIO.
-- CONCENTRE-TOI SUR LES 3 OU 4 CORRECTIONS LES PLUS IMPACTANTES AU TOTAL (maximum 4 éléments dans "errors") pour ne pas submerger l'étudiant.
+RÈGLES D'ÉVALUATION STRICTES, CHRONOLOGIQUES ET APPROFONDIES (DU DÉBUT À LA FIN SANS SAUTER UNE SEULE ERREUR) :
+- ORDRE CHRONOLOGIQUE STRICT : parcours la parole de l'étudiant DU TOUT DÉBUT DE L'AUDIO JUSQU'À LA TOUTE FIN, phrase après phrase, dans l'ordre exact où il a parlé. Ne regroupe jamais par type, ne saute jamais d'erreurs entre le début, le milieu et la fin.
+- IGNORE uniquement les hésitations naturelles ("hmm", "uhh", "umm"), pauses silencieuses, auto-corrections et essais répétés d'un mot (évalue uniquement le DERNIER essai).
+- TOLÉRANCE ZÉRO — IL N'Y A NI « PETITE ERREUR » NI « GROSSE ERREUR » : relève ABSOLUMENT TOUTES les erreurs entendues du début à la fin (aucune limite de nombre, même s'il y en a 10, 15 ou 25).
+- Couvre tous ces axes au fil de son audio :
+  1. Construction des Phrases, Clarté & Thème : vérifie si chaque phrase complète est bien structurée, logique sur le thème, et comment la reformuler naturellement.
+  2. Temps Verbaux & Grammaire (Phrases complètes) : relève TOUTES les fautes de temps verbaux (passé, présent, futur, conditionnel), auxiliaires, prépositions, articles (a/the), pluriels, accords, en expliquant clairement la règle pour que l'étudiant la comprenne vraiment.
+  3. Prononciation & Accent Américain 100 % (8 RÈGLES STRICTES) :
+     1) Son 'TH' (/θ/ et /ð/) : langue entre les dents (think, three, the, this, that) plutôt que D, T, Z, S ou F.
+     2) Son 'R' américain rétroflexe (/ɹ/) : langue reculée/enroulée sans toucher le palais (red, work, car, better).
+     3) Flap T (/ɾ/) : T/TT entre voyelles transformé en petit D rapide (water -> wader, better -> bedder, city, get it).
+     4) Silent T & Glottal Stop (/ʔ/) : T muet après N (internet -> innernet, twenty -> twenny) et T bloqué dans la gorge en fin de mot ou devant N (that, hot, button).
+     5) Connected Speech, Réductions & Schwa (/ə/) : liaisons fluides entre les mots, réductions naturelles (wanna, gonna, kinda, gotta), et Schwa sur les petits mots (to, for, a, of, and).
+     6) Intonation, Accent Tonique & Rythme : bon placement de l'accent tonique et mélodie montante/descendante naturelle sur toute la phrase.
+     7) Voyelles tendues/relâchées & Diphtongues : ship/sheep, bit/beat, full/fool, /æ/ ouvert (cat, ask), vraies diphtongues (/eɪ/, /oʊ/, /aɪ/).
+     8) Dark L (/ɫ/), Aspiration P/T/K, H expiré & Terminaisons -s/-ed : Dark L (feel, people), air sur P/T/K accentués, H soufflé, fins -s/-ed nettes.
+  4. Comment Sonner Beaucoup Mieux : propose 2 à 3 façons plus naturelles, élevées et authentiquement américaines de formuler ses phrases entières sur ce thème.
 - Réponds en JSON strict.`;
 
       // Notice: when evaluating audio, intentionally omit topicQuestion so Gemini NEVER confuses the question with the student's spoken words
       const basePrompt = typedText
-        ? `Niveau : ${level} | Sujet : "${topicTitle}" | Question : "${topicQuestion}"
+        ? `Niveau : ${level} | Thème : "${topicTitle}" | Question : "${topicQuestion}"
 Texte de l'étudiant : "${typedText}"`
-        : `Niveau de l'étudiant : ${level}
-ÉCOUTE ATTENTIVEMENT L'AUDIO JOINT du début à la fin.
-1) Mets "audioHeard" à true dès que tu entends une voix humaine ou des mots (même faibles, hésitants, avec du bruit de fond ou un fort accent). Mets false UNIQUEMENT si l'audio ne contient que du silence total ou du bruit mécanique sans aucune voix.
-2) Transcris mot pour mot ce que l'étudiant dit RÉELLEMENT dans cet audio dans "cleanTranscription" (sans inventer ni deviner à partir du thème "${topicTitle}").
-3) Fais toutes tes corrections STRICTEMENT sur les mots et la prononciation que tu as réellement entendus dans cet audio.`;
+        : `Niveau de l'étudiant : ${level} | Thème : "${topicTitle}"
+ÉCOUTE ATTENTIVEMENT L'AUDIO JOINT du tout début jusqu'à la toute fin, phrase après phrase dans l'ordre chronologique.
+1) Distingue la voix parlée DIRECTE (proche du micro) de tout fond sonore (musique, chanson chantée, paroles musicales, TV, radio). IGNORE complètement toute chanson ou musique de fond : ne transcris JAMAIS des paroles de chanson.
+2) Mets "backgroundMediaOnly" à true et "audioHeard" à false si tu entends uniquement ou principalement de la musique, une chanson/chant ou un média de fond sans voix parlée directe de l'étudiant.
+3) Mets "audioHeard" à true dès que tu entends une vraie voix parlée de l'étudiant au micro (même faible, hésitante ou avec un fort accent).
+4) Transcris mot pour mot UNIQUEMENT ce que l'étudiant dit RÉELLEMENT au micro dans "cleanTranscription" (sans inventer ni inclure de musique de fond).
+5) Relève ABSOLUMENT TOUTES les erreurs EN ORDRE CHRONOLOGIQUE DU DÉBUT À LA FIN sans en sauter aucune : phrases entières, temps verbaux, grammaire, naturel sur le thème "${topicTitle}", comment il sonnerait beaucoup mieux, ET les 8 règles d'accent américain.`;
 
       const schemaPromptSuffix = `
 
 JSON strict attendu :
-- "audioHeard": true dès qu'une voix humaine ou des mots (même faibles ou avec un fort accent) sont audibles, false UNIQUEMENT pour du silence total ou du bruit sans voix.
-- "cleanTranscription": transcription fidèle de ce que l'étudiant a réellement dit (sans fillers ni faux départs), ou "" si audioHeard est false.
-- "encouragementNote": court constat direct et lucide en français (PAS de flatterie vague).
-- "unclearNote": "" si tout était clair dès la première écoute, sinon mentionne précisément ce qui était flou ou ambigu en français.
-- "clarityFeedback": 1 à 2 phrases directes en français sur la Compréhension & Clarté de ce que l'étudiant a dit.
-- "correctedVersion": version complète corrigée en anglais américain naturel de CE QUE L'ÉTUDIANT A DIT.
+- "audioHeard": true uniquement si la voix parlée directe de l'étudiant est audible au micro; false pour silence, bruit, ou uniquement de la musique/chant de fond.
+- "backgroundMediaOnly": true si l'audio contient uniquement ou surtout de la musique, des paroles de chanson ou une vidéo/TV en fond sans parole directe de l'étudiant; sinon false.
+- "cleanTranscription": transcription fidèle de ce que l'étudiant a réellement dit (sans paroles de musique ni fillers), ou "" si audioHeard est false.
+- "encouragementNote": 1 phrase très courte et factuelle (5 à 10 mots max, ZÉRO flatterie), ex: "On comprend bien ton idée, corrigeons chaque point ensemble."
+- "unclearNote": "" si tout était clair dès la première écoute, sinon mentionne précisément ce qui était flou en français.
+- "clarityFeedback": 1 phrase posée et directe en français sur la clarté, la tenue des temps verbaux, le thème et la fluidité générale (sans longs compliments).
+- "correctedVersion": version INTÉGRALE, COMPLÈTE ET FIDÈLE (du premier mot jusqu'au dernier mot, sans rien résumer ni couper) en anglais américain naturel de TOUT CE QUE L'ÉTUDIANT VIENT DE DIRE, entièrement corrigé.
 - "scores": { "pronunciation": 0-100, "grammar": 0-100, "vocabulary": 0-100, "fluency": 0-100, "overall": 0-100 }.
-- "errors": tableau des 3 ou 4 corrections LES PLUS IMPACTANTES UNIQUEMENT issues de ce que l'étudiant a vraiment dit (trie prononciation en premier, puis grammar/vocabulary/fluency) : { "said": "mot/passage exact qu'il a vraiment dit", "correct": "version américaine correcte", "type": "pronunciation"|"grammar"|"vocabulary"|"fluency", "ipa": "IPA américain si prononciation sinon ''", "tip_fr": "explication claire et concrète en français (comment placer les sons américains ou corriger la règle/tournure)" }.
-- "upgradedExpressions": 2 à 3 améliorations de vocabulaire/phrasé adaptées à ses phrases réelles : { "basic": "expression utilisée dans son audio", "upgraded": "expression américaine plus naturelle et soutenue", "nuance_fr": "courte explication en français" }.
-- "repeatDrills": tableau de 2 à 4 mots clés et courtes phrases corrigées en anglais américain issus de ses erreurs réelles à faire répéter à voix haute immédiatement à la fin.
-- "spokenLessonScript": script oral COMPLET, direct, percutant et rythmé (entre 350 et 520 caractères, en tutoyant toujours l'élève — 'tu/ton/ta', jamais 'vous' — zéro blabla ni symboles IPA/markdown/numéros), prêt à être lu d'une traite : 1) constat direct sur la clarté, 2) les 3 ou 4 corrections prioritaires avec conseil concret en français et chaque mot/phrase anglais précédé d'une courte amorce naturelle, 3) 2 expressions améliorées, 4) phrase corrigée complète puis consigne directe pour répéter à voix haute les "repeatDrills" avec de courtes pauses "...".`;
+- "errors": tableau EXHAUSTIF et STRICTEMENT CHRONOLOGIQUE (du premier mot de l'audio jusqu'au dernier mot prononcé à la fin, SANS AUCUNE LIMITE DE NOMBRE) de TOUTES les erreurs entendues : { "said": "mot ou bout de phrase exact qu'il a dit", "correct": "version américaine correcte", "type": "pronunciation"|"grammar"|"vocabulary"|"fluency", "ipa": "IPA américain si prononciation sinon ''", "tip_fr": "EXPLICATION COMPLÈTE ET DÉTAILLÉE en 2 phrases claires en français : explique POURQUOI c'est une erreur et la règle exacte (temps verbal, structure de phrase, sens ou placement précis langue/dents/gorge/air en anglais américain)" }.
+- "upgradedExpressions": 2 à 3 améliorations de PHRASES OU TOURNURES COMPLÈTES pour qu'il sonne beaucoup plus naturel et fluide sur ce thème : { "basic": "phrase ou tournure utilisée dans son audio", "upgraded": "meilleure façon américaine de le dire", "nuance_fr": "courte explication en français" }.
+- "repeatDrills": tableau des phrases clés et mots importants corrigés (jusqu'à 10 éléments) à répéter calmement à la fin.
+- "spokenLessonScript": script oral LONG, COMPLET ET APPROFONDI (JAMAIS raccourci ni bâclé) d'un vrai professeur humain sage, chaleureux, posé et exigeant, qui PREND SON TEMPS pour bien expliquer chaque faute du TOUT DÉBUT de l'audio jusqu'à la TOUTE FIN sans en sauter une seule. OBLIGATIONS ABSOLUES :
+  1) Tutoiement ('tu/ton/ta'), 1 seule courte phrase d'ouverture (max 8-10 mots, zéro longue félicitation, zéro flatterie à la fin).
+  2) ORDRE CHRONOLOGIQUE STRICT DE LA PREMIÈRE À LA DERNIÈRE ERREUR DE "errors" : ne regroupe pas par catégorie, suis le fil exact de ce que l'étudiant a dit du début jusqu'à la fin.
+  3) STRUCTURE OBLIGATOIRE POUR CHAQUE ERREUR : tu DOIS dire explicitement "tu as dit" (ou "tu as prononcé") suivi de ce qu'il a dit entre guillemets, puis donner la correction américaine entre guillemets, puis prendre le temps d'EXPLIQUER CLAIREMENT POURQUOI ET COMMENT (2 phrases pédagogiques claires par erreur, jamais une petite phrase expédiée !). Exemple de ton naturel et détaillé : « Tout au début de ta réponse, tu as dit : "I go", alors qu'il faut dire : "I went". Comme tu racontes un souvenir d'hier qui est déjà terminé, tu dois utiliser le passé irrégulier du verbe aller au lieu du présent. Juste après, tu as dit : "drinked", mais en anglais ce verbe ne prend jamais E-D, on doit dire : "drank". »
+  4) RÈGLE D'OR POUR UN ACCENT FRANÇAIS PUR ET UN ACCENT AMÉRICAIN PUR : commence chaque phrase par au moins 5 à 8 mots en français naturel et fluide, mets TOUJOURS chaque mot ou phrase anglaise entre guillemets "..." après ":" ou une virgule, jamais de "..." au milieu d'une phrase, jamais d'IPA/markdown/numéros.
+  5) APRÈS TOUTES LES CORRECTIONS : propose brièvement les phrases améliorées sur le thème, PUIS lis OBLIGATOIREMENT ET INTÉGRALEMENT toute la réponse complète de l'étudiant entièrement corrigée du début à la fin ("correctedVersion" complète, sans rien couper ni résumer), puis fais répéter les "repeatDrills" séparés par "..." uniquement à la fin.`;
 
       const fullEvaluatePrompt = `${basePrompt}${schemaPromptSuffix}`;
 
@@ -1015,6 +1039,7 @@ JSON strict attendu :
                 type: Type.OBJECT,
                 properties: {
                   audioHeard: { type: Type.BOOLEAN },
+                  backgroundMediaOnly: { type: Type.BOOLEAN },
                   cleanTranscription: { type: Type.STRING },
                   encouragementNote: { type: Type.STRING },
                   unclearNote: { type: Type.STRING },
@@ -1068,6 +1093,7 @@ JSON strict attendu :
                 },
                 required: [
                   'audioHeard',
+                  'backgroundMediaOnly',
                   'cleanTranscription',
                   'encouragementNote',
                   'unclearNote',
@@ -1095,33 +1121,58 @@ JSON strict attendu :
           },
           (rawText) => JSON.parse(rawText),
           [FAST_MODEL, PRIMARY_MODEL],
-          30000
+          28000
         );
 
         if (
           processedAudioBase64 &&
-          (result.data?.audioHeard === false || !String(result.data?.cleanTranscription || '').trim())
+          (result.data?.backgroundMediaOnly === true ||
+            result.data?.audioHeard === false ||
+            !String(result.data?.cleanTranscription || '').trim())
         ) {
           console.warn(
-            `[Topic Speaking Evaluate] No words heard: mime=${audioMimeType} b64Len=${processedAudioBase64.length} wavPeak=${detectedWavPeak} audioHeard=${result.data?.audioHeard}`
+            `[Topic Speaking Evaluate] Rejected audio: mime=${audioMimeType} b64Len=${processedAudioBase64.length} wavPeak=${detectedWavPeak} audioHeard=${result.data?.audioHeard} backgroundMediaOnly=${result.data?.backgroundMediaOnly}`
           );
           res.status(400).json({
-            error:
-              "Je n'ai pas réussi à entendre de paroles dans ton audio. Parle plus près du microphone et réessaie.",
+            error: result.data?.backgroundMediaOnly
+              ? "J'ai surtout capté de la musique ou un son de fond, pas ta voix. Coupe ou baisse la musique, parle près du microphone et réessaie."
+              : "Je n'ai pas réussi à entendre de paroles dans ton audio. Parle plus près du microphone et réessaie.",
           });
           return;
         }
 
         const analysisMs = Date.now() - analysisStart;
+        const reportedErrors: LessonErrorInput[] = Array.isArray(result.data?.errors)
+          ? result.data.errors
+          : [];
         const transcriptPreview = String(result.data?.cleanTranscription || '').slice(0, 90);
         console.log(
-          `[Topic Speaking Timing] evaluate model=${result.modelUsed} analysisMs=${analysisMs}ms issuesFound=${Array.isArray(result.data?.errors) ? result.data.errors.length : 0} transcript="${transcriptPreview}"`
+          `[Topic Speaking Timing] evaluate model=${result.modelUsed} analysisMs=${analysisMs}ms issuesFound=${reportedErrors.length} transcript="${transcriptPreview}"`
         );
 
+        // Guarantee 100% of reported errors are thoroughly explained in strict chronological order with "tu as dit ..."
+        // AND the complete corrected speech of everything the student just said is spoken after all corrections
+        let finalSpokenScript = sanitizeSpokenText(String(result.data?.spokenLessonScript || ''));
+        if (reportedErrors.length > 0 || String(result.data?.correctedVersion || '').trim()) {
+          finalSpokenScript = ensureAllErrorsInSpokenScript(finalSpokenScript, reportedErrors, {
+            word,
+            level,
+            topicTitle,
+            cleanTranscription: result.data?.cleanTranscription,
+            encouragementNote: result.data?.encouragementNote,
+            unclearNote: result.data?.unclearNote,
+            clarityFeedback: result.data?.clarityFeedback,
+            correctedVersion: result.data?.correctedVersion,
+            errors: reportedErrors,
+            upgradedExpressions: result.data?.upgradedExpressions,
+            repeatDrills: result.data?.repeatDrills,
+          });
+        }
+        result.data.spokenLessonScript = finalSpokenScript;
+
         // Pre-warm coach audio synthesis in parallel while evaluate JSON travels to browser
-        const prefetchedScript = sanitizeSpokenText(String(result.data?.spokenLessonScript || ''));
-        if (prefetchedScript.length > 20) {
-          prefetchLessonAudio(TOPIC_SPEAKING_VOICE_CONFIG.defaultVoice, prefetchedScript);
+        if (finalSpokenScript.length > 20) {
+          prefetchLessonAudio(TOPIC_SPEAKING_VOICE_CONFIG.defaultVoice, finalSpokenScript);
         }
 
         res.json({ ...result.data, provider: 'Gemini', serverTiming: { analysisMs } });
@@ -1255,103 +1306,85 @@ JSON strict attendu :
       .replace(/\s+/g, ' ')
       .trim();
 
+  const formatThoroughErrorLine = (err: LessonErrorInput, index = 0, total = 1): string => {
+    const said = sanitizeSpokenText(err.said || '');
+    const correct = sanitizeSpokenText(err.correct || '');
+    const tip = sanitizeSpokenText(err.tip_fr || '').replace(/\.$/, '');
+    const errType = err.type || 'pronunciation';
+
+    const positionLead =
+      index === 0
+        ? 'Tout au début de ta réponse,'
+        : index === total - 1 && total > 2
+          ? 'Vers la fin de ton audio,'
+          : index % 3 === 1
+            ? 'Juste après,'
+            : index % 3 === 2
+              ? 'Un peu plus loin,'
+              : 'Ensuite dans ta phrase,';
+
+    if (errType === 'pronunciation') {
+      const core =
+        said && correct
+          ? `${positionLead} tu as prononcé : "${said}", et pour obtenir un accent vraiment américain, on prononce plutôt : "${correct}".`
+          : correct
+            ? `${positionLead} tu as dit : "${correct}", travaillons bien sa prononciation américaine : "${correct}".`
+            : '';
+      return tip ? `${core} ${tip}.`.trim() : core;
+    }
+
+    if (errType === 'grammar') {
+      const core =
+        said && correct
+          ? `${positionLead} tu as dit : "${said}", alors qu'il faut vraiment dire : "${correct}".`
+          : correct
+            ? `${positionLead} attention à la grammaire, la forme juste en anglais est : "${correct}".`
+            : '';
+      return tip ? `${core} ${tip}.`.trim() : core;
+    }
+
+    const core =
+      said && correct
+        ? `${positionLead} tu as dit : "${said}", mais pour que ta phrase sonne plus naturelle sur ce thème, il vaut mieux dire : "${correct}".`
+        : correct
+          ? `${positionLead} une façon beaucoup plus naturelle de le dire en anglais américain est : "${correct}".`
+          : '';
+    return tip ? `${core} ${tip}.`.trim() : core;
+  };
+
   const buildFallbackFrenchAmericanScript = (payload: LessonAudioPayload): string => {
-    const rawErrors = Array.isArray(payload.errors) ? payload.errors : [];
-    const priorityRank = (t?: string) =>
-      t === 'pronunciation' ? 0 : t === 'grammar' ? 1 : t === 'vocabulary' ? 2 : 3;
-    const topErrors = [...rawErrors]
-      .sort((a, b) => priorityRank(a.type) - priorityRank(b.type))
-      .slice(0, 4);
+    // Preserve exact chronological order from start of student's audio to the very end
+    const allErrors = Array.isArray(payload.errors) ? payload.errors : [];
 
     const upgrades = Array.isArray(payload.upgradedExpressions)
       ? payload.upgradedExpressions.filter((u) => u && u.upgraded).slice(0, 3)
       : [];
 
     const drills = Array.isArray(payload.repeatDrills)
-      ? payload.repeatDrills.map((d) => sanitizeSpokenText(d)).filter(Boolean).slice(0, 4)
-      : topErrors.map((e) => sanitizeSpokenText(e.correct || '')).filter(Boolean).slice(0, 3);
+      ? payload.repeatDrills.map((d) => sanitizeSpokenText(d)).filter(Boolean).slice(0, 10)
+      : allErrors.map((e) => sanitizeSpokenText(e.correct || '')).filter(Boolean).slice(0, 10);
 
     const parts: string[] = [];
 
-    // 1. Comprehension & Clarity (direct, no gentle fluff)
+    // 1. Brief grounded opening (no long congratulations) + clarity check
     const clarityText = sanitizeSpokenText(
       payload.clarityFeedback || payload.unclearNote || ''
     );
     if (clarityText) {
-      parts.push(`Bon, on attaque directement ton retour, sans détour. D'abord sur la clarté de ton message : ${clarityText}`);
+      parts.push(`On comprend bien ton idée, prenons maintenant chaque faute du début à la fin. ${clarityText}`);
     } else {
-      parts.push("Bon, on attaque directement ton retour. D'abord, côté compréhension, ton idée principale passe tout de suite, mais on va corriger les points qui bloquent encore ton naturel.");
+      parts.push('On comprend bien ton idée, reprenons maintenant chaque faute du début jusqu’à la fin de ton audio.');
     }
 
-    // 2. Top 3-4 most impactful corrections (Pronunciation & American Accent + Natural Phrasing & Grammar)
-    if (topErrors.length > 0) {
-      parts.push(
-        `Je garde uniquement les ${topErrors.length} corrections les plus importantes pour que tu progresses vite sans te disperser.`
-      );
-
-      const pronLeads = [
-        'Côté accent américain,',
-        'Ensuite sur la prononciation américaine,',
-        'Un autre son à corriger tout de suite,',
-        'Toujours sur ton accent américain,',
-      ];
-      const grammarLeads = [
-        'Sur la grammaire et le phrasé naturel,',
-        'Autre point de structure qui sonne peu naturel,',
-        'Regarde aussi cette tournure :',
-        'Et côté grammaire,',
-      ];
-      const vocabFluencyLeads = [
-        'Pour un phrasé vraiment américain,',
-        'Côté choix des mots,',
-        'Tu gagneras aussi en naturel ici :',
-        'Et pour éviter la traduction littérale,',
-      ];
-
-      topErrors.forEach((err, idx) => {
-        const said = sanitizeSpokenText(err.said || '');
-        const correct = sanitizeSpokenText(err.correct || '');
-        const tip = sanitizeSpokenText(err.tip_fr || '');
-        const errType = err.type || 'pronunciation';
-
-        if (errType === 'pronunciation') {
-          let line = pronLeads[idx % pronLeads.length];
-          if (said && correct) {
-            line += ` quand tu as voulu dire... "${said}", l'articulation américaine n'était pas assez nette. Écoute bien comment on le prononce... "${correct}". "${correct}".`;
-          } else if (correct) {
-            line += ` fais très attention à la prononciation de... "${correct}". "${correct}".`;
-          }
-          if (tip) {
-            line += ` ${tip.endsWith('.') || tip.endsWith('!') || tip.endsWith('?') ? tip : `${tip}.`}`;
-          }
-          parts.push(line);
-        } else if (errType === 'grammar') {
-          let line = grammarLeads[idx % grammarLeads.length];
-          if (said && correct) {
-            line += ` tu as dit... "${said}", mais en anglais américain correct on dit... "${correct}".`;
-          } else if (correct) {
-            line += ` la forme correcte en anglais américain, c'est... "${correct}".`;
-          }
-          if (tip) {
-            line += ` ${tip.endsWith('.') || tip.endsWith('!') || tip.endsWith('?') ? tip : `${tip}.`}`;
-          }
-          parts.push(line);
-        } else {
-          let line = vocabFluencyLeads[idx % vocabFluencyLeads.length];
-          if (said && correct) {
-            line += ` au lieu de "${said}", un Américain dirait plutôt... "${correct}".`;
-          } else if (correct) {
-            line += ` la tournure naturelle en anglais américain, c'est... "${correct}".`;
-          }
-          if (tip) {
-            line += ` ${tip.endsWith('.') || tip.endsWith('!') || tip.endsWith('?') ? tip : `${tip}.`}`;
-          }
-          parts.push(line);
-        }
+    // 2. ALL corrections in strict chronological order with "tu as dit ..." + thorough explanation
+    if (allErrors.length > 0) {
+      allErrors.forEach((err, idx) => {
+        const line = formatThoroughErrorLine(err, idx, allErrors.length);
+        if (line) parts.push(line);
       });
     }
 
-    // 3. Upgraded Vocabulary & Better Ways to Say It
+    // 3. How to sound much better on this topic (upgraded sentences/phrases)
     if (upgrades.length > 0) {
       const upgradeLines = upgrades
         .map((u) => {
@@ -1362,69 +1395,189 @@ JSON strict attendu :
             ? `${rawNuance.charAt(0).toLowerCase()}${rawNuance.slice(1)}`
             : '';
           if (basic && up) {
-            return `au lieu de "${basic}", essaie plutôt... "${up}"${nuance ? ` — ${nuance}` : ''}`;
+            return `au lieu de "${basic}", tu sonnerais beaucoup plus naturel en disant : "${up}"${nuance ? `, parce que ${nuance}` : ''}`;
           }
-          return `tu peux utiliser... "${up}"${nuance ? ` — ${nuance}` : ''}`;
+          return `tu peux aussi dire : "${up}"${nuance ? `, parce que ${nuance}` : ''}`;
         })
-        .join(' ; et ');
-      parts.push(`Pour monter d'un cran côté vocabulaire et exprimer tes idées plus fluidement, ${upgradeLines}.`);
+        .join(', et ');
+      parts.push(`Pour que tes phrases sonnent encore plus fluides sur ce thème, ${upgradeLines}.`);
     }
 
-    // 4. Full corrected version + Immediate repeat-out-loud drill
+    // 4. Full corrected version + patient repeat-out-loud drill (zero flattery outro)
     if (payload.correctedVersion?.trim()) {
       parts.push(
-        `Voici maintenant ta réponse complète dans un anglais américain naturel... "${sanitizeSpokenText(payload.correctedVersion)}".`
+        `Maintenant, écoute tranquillement toute ta réponse corrigée du début à la fin dans un anglais américain fluide : "${sanitizeSpokenText(payload.correctedVersion)}".`
       );
     }
 
     if (drills.length > 0) {
       parts.push(
-        `Maintenant, à toi de parler tout de suite à voix haute. Répète exactement après moi avec l'accent américain... ${drills
-          .map((d) => `"${d}"... ...`)
-          .join(' ')} Prends le temps de les redire bien fort pour ancrer le rythme.`
+        `Pour terminer sans te presser, répète à voix haute juste après moi : ${drills.map((d) => `"${d}"...`).join(' ')}`
       );
     } else {
       parts.push(
-        'Maintenant, répète la phrase corrigée à voix haute juste après moi, en exagérant bien le R et le rythme américain.'
+        'Pour terminer sans te presser, répète toute la phrase corrigée à voix haute juste après moi.'
       );
     }
 
     return parts.join(' ');
   };
 
+  const ensureFullCorrectedVersionInTail = (
+    script: string,
+    correctedVersion?: string
+  ): string => {
+    const cleanScript = sanitizeSpokenText(script);
+    const fullCorrected = sanitizeSpokenText(correctedVersion || '');
+    if (!fullCorrected) return cleanScript;
+
+    const closingMatch = cleanScript.match(
+      /\s+(?:Voici(?:\s+maintenant)?\s+(?:tout\s+ce\s+que\s+tu|ta|la)\s+(?:phrase|réponse|version|viens)|Écoute(?:\s+maintenant)?\s+(?:la\s+phrase|tout\s+ce\s+que)|Maintenant(?:\s+que\s+nous)?,?\s+(?:écoute|voici)|Je te propose maintenant de répéter|Pour\s+(?:finir|terminer),?\s+répète|À toi\s+de\s+répéter|Répète(?:\s+maintenant)?\s+(?:ces\s+segments\s+)?après\s+moi)/i
+    );
+    const splitIdx =
+      closingMatch && typeof closingMatch.index === 'number' ? closingMatch.index : cleanScript.length;
+    const beforeTail = cleanScript.slice(0, splitIdx).trim();
+    const tailSection = cleanScript.slice(splitIdx).trim();
+
+    const normCorrected = fullCorrected
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const normTail = ` ${tailSection.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+    const tokens = normCorrected.split(' ').filter((w) => w.length >= 3);
+    const matchedCount = tokens.filter((t) => normTail.includes(` ${t} `)).length;
+    const hasFullCorrected =
+      normTail.includes(` ${normCorrected} `) ||
+      (tokens.length > 0 && matchedCount >= Math.ceil(tokens.length * 0.85));
+
+    if (hasFullCorrected) return cleanScript;
+
+    const correctedBlock = `Maintenant que toutes les corrections sont terminées, écoute attentivement tout ce que tu viens de dire, entièrement corrigé du début à la fin : "${fullCorrected}".`;
+    return tailSection
+      ? `${beforeTail} ${correctedBlock} ${tailSection}`.trim()
+      : `${beforeTail} ${correctedBlock}`.trim();
+  };
+
+  const ensureAllErrorsInSpokenScript = (
+    script: string,
+    errors: LessonErrorInput[],
+    fallbackPayload?: LessonAudioPayload
+  ): string => {
+    const cleanScript = sanitizeSpokenText(script);
+    if (errors.length === 0) {
+      return ensureFullCorrectedVersionInTail(cleanScript, fallbackPayload?.correctedVersion);
+    }
+    if (!cleanScript || cleanScript.length < 80) {
+      return fallbackPayload
+        ? buildFallbackFrenchAmericanScript({ ...fallbackPayload, errors })
+        : cleanScript;
+    }
+
+    // Inspect ONLY the teaching body (before the final full corrected version / repeat drills)
+    // so an uncorrected item merely appearing inside correctedVersion doesn't hide a skipped explanation!
+    const closingMatch = cleanScript.match(
+      /\s+(?:Voici(?:\s+maintenant)?\s+(?:tout\s+ce\s+que\s+tu|ta|la)\s+(?:phrase|réponse|version|viens)|Écoute(?:\s+maintenant)?\s+(?:la\s+phrase|tout\s+ce\s+que)|Maintenant(?:\s+que\s+nous)?,?\s+(?:écoute|voici)|Je te propose maintenant de répéter|Pour\s+(?:finir|terminer),?\s+répète|À toi\s+de\s+répéter|Répète(?:\s+maintenant)?\s+(?:ces\s+segments\s+)?après\s+moi)/i
+    );
+    const splitIdx = closingMatch && typeof closingMatch.index === 'number' ? closingMatch.index : cleanScript.length;
+    const teachingBody = cleanScript.slice(0, splitIdx).trim();
+    const tailSection = cleanScript.slice(splitIdx).trim();
+
+    const normalizedBody = ` ${teachingBody.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+    const hasTokenCoverage = (phrase: string): boolean => {
+      const normalized = sanitizeSpokenText(String(phrase || ''))
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!normalized) return true;
+      if (normalizedBody.includes(` ${normalized} `)) return true;
+      const tokens = normalized.split(' ').filter((w) => w.length >= 2);
+      if (tokens.length === 0) return true;
+      const keyTokens = tokens.filter((w) => w.length >= 3);
+      const checkTokens = keyTokens.length > 0 ? keyTokens : tokens;
+      return checkTokens.every((t) => normalizedBody.includes(` ${t} `));
+    };
+
+    const missedErrors: { err: LessonErrorInput; index: number }[] = [];
+    let saidQuotedCount = 0;
+    let distinctSaidCount = 0;
+
+    for (let i = 0; i < errors.length; i++) {
+      const err = errors[i];
+      const correctOk = hasTokenCoverage(err?.correct || '');
+      const normSaid = sanitizeSpokenText(String(err?.said || '')).toLowerCase().trim();
+      const normCorrect = sanitizeSpokenText(String(err?.correct || '')).toLowerCase().trim();
+      const hasDistinctSaid = Boolean(normSaid && normSaid !== normCorrect);
+      if (hasDistinctSaid) {
+        distinctSaidCount++;
+        if (hasTokenCoverage(normSaid)) {
+          saidQuotedCount++;
+        }
+      }
+      if (!correctOk) {
+        missedErrors.push({ err, index: i });
+      }
+    }
+
+    const usesTuAsDitPhrase = /\b(?:tu as dit|tu as prononcé|tu as utilisé|tu disais)\b/i.test(teachingBody);
+    const avgCharsPerError = teachingBody.length / Math.max(1, errors.length);
+    const missingManySaidQuotes = distinctSaidCount >= 2 && saidQuotedCount < Math.ceil(distinctSaidCount * 0.65);
+
+    // If Gemini rushed the lesson (<115 chars/error), omitted "tu as dit ...", or dropped >=2 errors out of chronological order,
+    // rebuild cleanly in strict chronological start-to-end order using every error's full tip_fr!
+    if (
+      fallbackPayload &&
+      (missedErrors.length >= 2 ||
+        !usesTuAsDitPhrase ||
+        missingManySaidQuotes ||
+        avgCharsPerError < 115)
+    ) {
+      return buildFallbackFrenchAmericanScript({ ...fallbackPayload, errors });
+    }
+
+    const withAllErrors =
+      missedErrors.length === 0
+        ? cleanScript
+        : (() => {
+            const patchBlock = missedErrors
+              .map(({ err, index }) => formatThoroughErrorLine(err, index, errors.length))
+              .filter(Boolean)
+              .join(' ');
+            return tailSection ? `${teachingBody} ${patchBlock} ${tailSection}`.trim() : `${teachingBody} ${patchBlock}`.trim();
+          })();
+
+    return ensureFullCorrectedVersionInTail(withAllErrors, fallbackPayload?.correctedVersion);
+  };
+
   const generateConversationalLessonScript = async (
     payload: LessonAudioPayload
   ): Promise<string> => {
-    const rawErrors = Array.isArray(payload.errors) ? payload.errors : [];
-    const priorityRank = (t?: string) =>
-      t === 'pronunciation' ? 0 : t === 'grammar' ? 1 : t === 'vocabulary' ? 2 : 3;
-    // Focus strictly on the top 3 or 4 most impactful corrections
-    const topErrors = [...rawErrors]
-      .sort((a, b) => priorityRank(a.type) - priorityRank(b.type))
-      .slice(0, 4);
+    // Keep exact chronological order from start to end of the student's audio
+    const allErrors = Array.isArray(payload.errors) ? payload.errors : [];
 
     const upgrades = Array.isArray(payload.upgradedExpressions)
       ? payload.upgradedExpressions.slice(0, 3)
       : [];
 
     const drills = Array.isArray(payload.repeatDrills)
-      ? payload.repeatDrills.filter(Boolean).slice(0, 4)
+      ? payload.repeatDrills.filter(Boolean).slice(0, 10)
       : [];
 
     const fallbackScript = buildFallbackFrenchAmericanScript({
       ...payload,
-      errors: topErrors,
+      errors: allErrors,
       upgradedExpressions: upgrades,
       repeatDrills: drills,
     });
 
-    if (topErrors.length === 0 && upgrades.length === 0 && !payload.correctedVersion) {
+    if (allErrors.length === 0 && upgrades.length === 0 && !payload.correctedVersion) {
       return fallbackScript;
     }
 
     const errorsBlock =
-      topErrors.length > 0
-        ? topErrors
+      allErrors.length > 0
+        ? allErrors
             .map((e, i) => {
               const kind = e.type || 'pronunciation';
               const said = e.said ? `"${e.said}"` : '(imprécis)';
@@ -1433,7 +1586,7 @@ JSON strict attendu :
               return `${i + 1}. [${kind}] ${said} -> ${correct}${tip}`;
             })
             .join('\n')
-        : 'Aucune erreur majeure détectée.';
+        : 'Aucune erreur détectée.';
 
     const upgradesBlock =
       upgrades.length > 0
@@ -1443,34 +1596,34 @@ JSON strict attendu :
                 `${i + 1}. ${u.basic ? `"${u.basic}" -> ` : ''}"${u.upgraded || ''}"${u.nuance_fr ? ` (${u.nuance_fr})` : ''}`
             )
             .join('\n')
-        : '(Propose 2 expressions américaines plus naturelles et élevées pour exprimer ses idées)';
+        : '(Propose 2 façons plus naturelles de reformuler ses phrases sur ce thème)';
 
     const drillsBlock =
       drills.length > 0
         ? drills.map((d) => `"${d}"`).join(' | ')
-        : topErrors.map((e) => `"${e.correct}"`).filter(Boolean).join(' | ');
+        : allErrors.map((e) => `"${e.correct}"`).filter(Boolean).join(' | ');
 
-    const scriptSystemInstruction = `Tu es un coach d'anglais américain strict, exigeant, précis et bienveillant qui parle couramment français.
-Écris UNE SEULE correction orale continue, comme un vrai coach américain exigeant en tête-à-tête avec son élève.
+    const scriptSystemInstruction = `Tu es un vrai professeur d'anglais américain très sage, chaleureux, patient et posé, mais exigeant sur chaque faute pour que l'étudiant progresse vraiment.
+Écris UNE leçon orale APPROFONDIE, complète et naturelle — ne raccourcis JAMAIS tes explications.
 
-INTERDICTIONS STRICTES :
-- PAS de résumé vague, PAS de flatterie gentille inutile ("c'est génial", "bravo tu es super"). Sois direct, honnête, concret et encourageant par la précision.
-- AUCUN titre robotique ("Point 1", "Domaine 2"), AUCUN symbole IPA (/.../), AUCUN markdown (*, #, -), AUCUNE puce, AUCUN numéro, AUCUNE parenthèse, AUCUN emoji. Uniquement du texte parlé fluide.
+RÈGLES ABSOLUES :
+- VOIX CHALEUREUSE, SAGE ET HUMAINE : tutoie l'élève ('tu/ton/ta'), une seule courte phrase d'ouverture (6-10 mots max, sans longues félicitations), puis prends vraiment ton temps pour bien expliquer.
+- ORDRE CHRONOLOGIQUE STRICT DU DÉBUT À LA FIN : traite toutes les ${allErrors.length} erreurs exactement dans l'ordre numérique 1, 2, 3... jusqu'à ${allErrors.length} (du commencement de son audio jusqu'à la fin) sans en sauter une seule.
+- OBLIGATION "TU AS DIT ..." + EXPLICATION COMPLÈTE : pour CHAQUE erreur, dis clairement "tu as dit" (ou "tu as prononcé") avec ses mots exacts entre guillemets, donne la correction entre guillemets, puis explique en 2 phrases claires POURQUOI et COMMENT (règle grammaticale/temps verbal ou placement exact bouche/langue/air en anglais américain).
+- ACCENT FRANÇAIS PUR & ANGLAIS AMÉRICAIN PUR : commence chaque phrase par au moins 5 à 8 mots en français fluide, mets TOUJOURS les mots ou phrases anglaises entre guillemets "..." après ":" ou une virgule, et ne mets jamais "..." au milieu d'une phrase.
+- AUCUN titre, AUCUN IPA (/.../), AUCUN markdown (*, #, -), AUCUN numéro, AUCUNE parenthèse, AUCUN emoji.
 
-STRUCTURE OBLIGATOIRE EN 4 TEMPS (en français oral naturel pour les explications, anglais américain obligatoire pour chaque mot/phrase en anglais) :
-1. COMPRÉHENSION & CLARTÉ : Commence sans blabla. Dis franchement si tout ce qu'il a dit était clair tout de suite, ou pointe exactement le passage qui était flou, ambigu ou difficile à suivre.
-2. TOP ${Math.max(1, topErrors.length)} CORRECTIONS LES PLUS IMPACTANTES (Prononciation américaine + Phrasé & Grammaire) :
-   - Couvre chaque correction ci-dessous sans en ajouter d'autres pour ne pas le submerger.
-   - Pour la prononciation américaine (R américain, TH, flap T, voyelles, accent tonique, intonation, rythme/liaisons), explique concrètement en français comment prononcer et fais entendre clairement le mot avec un lead-in américain : par exemple : En anglais américain, on prononce... "comfortable". Comfortable.
-   - Pour la grammaire et le phrasé naturel (temps, prépositions, pluriels, traductions littérales), explique pourquoi ça ne sonne pas naturel pour un Américain et donne la tournure authentique.
-3. VOCABULAIRE AMÉLIORÉ (2 à 3 expressions) : Donne 2 ou 3 mots ou tournures américaines plus naturelles et de meilleur niveau pour exprimer ses idées principales plus fluidement.
-4. VERSION CORRIGÉE + RÉPÉTITION À VOIX HAUTE OBLIGATOIRE : Lis clairement sa phrase corrigée complète en anglais américain, puis demande-lui explicitement de répéter à voix haute les mots et phrases clés tout de suite ("À toi, répète après moi à voix haute..."), en mettant de vraies pauses "..." après chaque élément pour lui laisser le temps de pratiquer immédiatement.`;
+STRUCTURE EN 4 TEMPS :
+1. Ouverture courte et chaleureuse (max 8-10 mots, sans longs compliments).
+2. Parcours chronologique complet du début à la fin de TOUTES les ${allErrors.length} erreurs (avec "tu as dit..." + correction + explication approfondie).
+3. Comment sonner encore mieux : 2 à 3 tournures ou phrases améliorées sur ce sujet.
+4. IMMÉDIATEMENT APRÈS TOUTES LES CORRECTIONS : lis OBLIGATOIREMENT ET INTÉGRALEMENT toute la réponse complète que l'étudiant vient de dire entièrement corrigée du début à la fin (sans rien résumer ni couper), puis invite calmement à répéter les mots et phrases clés séparés par "..." (ZÉRO flatterie à la fin).`;
 
     const scriptPrompt = `Mot : "${payload.word || ''}" | Niveau : ${payload.level || 'B1'} | Sujet : "${payload.topicTitle || ''}"
 Ce que l'étudiant a dit : "${payload.cleanTranscription || ''}"
 Évaluation clarté : "${payload.clarityFeedback || payload.unclearNote || 'Message compréhensible dans l’ensemble.'}"
 
-LES ${topErrors.length} CORRECTIONS PRIORITAIRES (inclus-les toutes, reste focalisé dessus) :
+TOUTES LES ${allErrors.length} CORRECTIONS À TRAITER SANS EXCEPTION :
 ${errorsBlock}
 
 EXPRESSIONS AMÉLIORÉES (2-3) :
@@ -1502,20 +1655,12 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
       );
       const generated = sanitizeSpokenText(response.text || '');
       if (generated.length > 100) {
-        const normalizedGen = generated.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-        const droppedError = topErrors.some((e) => {
-          const tokens = sanitizeSpokenText(e.correct || '')
-            .toLowerCase()
-            .replace(/[^a-z0-9\s]/g, ' ')
-            .trim()
-            .split(/\s+/)
-            .filter((w) => w.length >= 2);
-          return tokens.length > 0 && tokens.every((t) => !normalizedGen.includes(t));
+        return ensureAllErrorsInSpokenScript(generated, allErrors, {
+          ...payload,
+          errors: allErrors,
+          upgradedExpressions: upgrades,
+          repeatDrills: drills,
         });
-        if (!droppedError) {
-          return generated;
-        }
-        console.warn('[Topic Speaking Lesson Script] LLM script dropped a priority correction, using fallback.');
       }
     } catch (err) {
       console.warn('[Topic Speaking Lesson Script] Using deterministic French script fallback:', err);
@@ -1524,11 +1669,26 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     return fallbackScript;
   };
 
-  const synthesizeLessonWithGeminiLive = async (
+  const applyEdgeFadePcm = (pcm: Buffer, sampleRate: number, fadeMs = 12): Buffer => {
+    const out = Buffer.from(pcm);
+    const totalSamples = Math.floor(out.length / 2);
+    const fadeSamples = Math.min(Math.floor((sampleRate * fadeMs) / 1000), Math.floor(totalSamples / 4));
+    for (let i = 0; i < fadeSamples; i++) {
+      const gain = i / Math.max(1, fadeSamples);
+      const startOff = i * 2;
+      const endOff = (totalSamples - 1 - i) * 2;
+      out.writeInt16LE(Math.round(out.readInt16LE(startOff) * gain), startOff);
+      out.writeInt16LE(Math.round(out.readInt16LE(endOff) * gain), endOff);
+    }
+    return out;
+  };
+
+  const synthesizeSingleGeminiLiveChunk = async (
     model: string,
     chosenVoice: string,
-    lessonScript: string
-  ): Promise<{ audioBase64: string; modelUsed: string; voiceName: string }> => {
+    chunkText: string,
+    timeoutMs: number
+  ): Promise<Buffer> => {
     const ai = getGeminiClient();
 
     const liveConfig: any = {
@@ -1541,7 +1701,7 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
       systemInstruction: TOPIC_SPEAKING_VOICE_CONFIG.styleInstruction,
     };
 
-    const userPrompt = `Lis mot pour mot et exactement tel qu'il est écrit ce script de correction complet du début à la fin (sans rien inventer, modifier ni ajouter d'autre), avec une voix très humaine, chaleureuse et expressive. Parle toutes les explications en français naturel et prononce chaque mot ou phrase en anglais avec un accent américain obligatoire :\n\n${lessonScript}`;
+    const userPrompt = `Tu es en appel vocal 1-à-1 avec ton étudiant. Parle-lui avec une voix chaleureuse, posée, profondément humaine et expressive — de vraies respirations douces, une belle mélodie naturelle dans la voix et un rythme détendu, jamais mécanique ni monotone. Parle tout le français comme un vrai francophone et prononce chaque exemple anglais avec un pur accent américain, en suivant fidèlement du début à la fin toutes les corrections ci-dessous sans rien sauter ni inventer d'autre sujet :\n\n${chunkText}`;
 
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -1579,21 +1739,16 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
           reject(emptyErr);
           return;
         }
-        const wavBase64 = ensureWavFromPcmBuffer(Buffer.concat(pcmChunks), 24000);
-        resolve({
-          audioBase64: wavBase64,
-          modelUsed: model,
-          voiceName: chosenVoice,
-        });
+        resolve(Buffer.concat(pcmChunks));
       };
 
       const timeoutId = setTimeout(() => {
         if (totalBytes > 4000) {
           finishSuccess();
         } else {
-          finishReject(new Error(`Timeout after 95000ms (${model})`));
+          finishReject(new Error(`Timeout after ${timeoutMs}ms (${model})`));
         }
-      }, 95000);
+      }, timeoutMs);
 
       ai.live
         .connect({
@@ -1657,20 +1812,128 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     });
   };
 
-  const synthesizeLessonWithGeminiTts = async (
+  const synthesizeLessonWithGeminiLive = async (
     model: string,
     chosenVoice: string,
     lessonScript: string
   ): Promise<{ audioBase64: string; modelUsed: string; voiceName: string }> => {
+    const trimmed = lessonScript.trim();
+    const chunks = splitBalancedTtsChunks(trimmed, 950);
+
+    if (chunks.length === 1) {
+      const timeoutMs = Math.max(38000, Math.min(50000, trimmed.length * 42));
+      const pcm = await synthesizeSingleGeminiLiveChunk(model, chosenVoice, trimmed, timeoutMs);
+      return {
+        audioBase64: ensureWavFromPcmBuffer(pcm, 24000),
+        modelUsed: model,
+        voiceName: chosenVoice,
+      };
+    }
+
+    // For longer thorough start-to-end lessons, run balanced chronological Live chunks concurrently so nothing times out
+    const pcmClips = await Promise.all(
+      chunks.map((chunk, idx) =>
+        delay(idx * 120).then(() => {
+          const timeoutMs = Math.max(38000, Math.min(48000, chunk.length * 48));
+          return synthesizeSingleGeminiLiveChunk(model, chosenVoice, chunk, timeoutMs);
+        })
+      )
+    );
+
+    const pcmParts: Buffer[] = [];
+    pcmClips.forEach((pcm, idx) => {
+      if (idx > 0) {
+        pcmParts.push(Buffer.alloc(Math.round(24000 * 0.18) * 2));
+      }
+      pcmParts.push(applyEdgeFadePcm(pcm, 24000, 12));
+    });
+
+    return {
+      audioBase64: ensureWavFromPcmBuffer(Buffer.concat(pcmParts), 24000),
+      modelUsed: model,
+      voiceName: chosenVoice,
+    };
+  };
+
+  const splitBalancedTtsChunks = (script: string, maxSingleLen = 1500): string[] => {
+    const clean = script.trim();
+    // Keep normal lessons in ONE cohesive take; split longer thorough lessons cleanly into balanced chronological parts
+    if (clean.length <= maxSingleLen) return [clean];
+
+    const targetPerChunk = Math.max(700, Math.round(maxSingleLen * 0.85));
+    const chunkCount = Math.min(4, Math.max(2, Math.ceil(clean.length / targetPerChunk)));
+
+    const sentences = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
+    if (sentences.length <= 1) {
+      const words = clean.split(/\s+/);
+      const mid = Math.ceil(words.length / 2);
+      return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')].filter(Boolean);
+    }
+
+    const chunks: string[] = [];
+    let current = '';
+    let remainingChars = clean.length;
+
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = sentences[i];
+      const chunksLeft = chunkCount - chunks.length;
+      const targetLen = chunksLeft > 1 ? Math.ceil(remainingChars / chunksLeft) : Infinity;
+
+      if (current && chunks.length < chunkCount - 1 && current.length >= targetLen * 0.72) {
+        chunks.push(current.trim());
+        remainingChars -= current.length + 1;
+        current = sentence;
+      } else {
+        current = current ? `${current} ${sentence}` : sentence;
+      }
+    }
+    if (current.trim()) {
+      chunks.push(current.trim());
+    }
+    return chunks.length > 0 ? chunks : [clean];
+  };
+
+  const extractPcmFromWavBuffer = (wavBuf: Buffer): { pcm: Buffer; sampleRate: number } => {
+    if (wavBuf.length > 44 && wavBuf.subarray(0, 4).toString('ascii') === 'RIFF') {
+      const sampleRate = wavBuf.readUInt32LE(24) || 24000;
+      let offset = 12;
+      while (offset + 8 <= wavBuf.length) {
+        const chunkId = wavBuf.subarray(offset, offset + 4).toString('ascii');
+        const chunkSize = wavBuf.readUInt32LE(offset + 4);
+        if (chunkId === 'data') {
+          const start = offset + 8;
+          const end = Math.min(wavBuf.length, start + chunkSize);
+          return { pcm: wavBuf.subarray(start, end), sampleRate };
+        }
+        offset += 8 + chunkSize + (chunkSize % 2);
+      }
+      return { pcm: wavBuf.subarray(44), sampleRate };
+    }
+    return { pcm: wavBuf, sampleRate: 24000 };
+  };
+
+  const synthesizeTtsChunk = async (
+    model: string,
+    chosenVoice: string,
+    chunkText: string,
+    timeoutMs: number
+  ): Promise<string> => {
     const ai = getGeminiClient();
-    // Pass ONLY the clean spoken text so TTS models never read style instructions out loud
     const response = await withTimeout(
       ai.models.generateContent({
         model,
         contents: [
           {
             role: 'user',
-            parts: [{ text: lessonScript }],
+            parts: [
+              {
+                text: chunkText,
+                speechMetadata: {
+                  style:
+                    'Warm, expressive, natural conversational French teacher speaking 1-on-1 with genuine human inflection, relaxed breathing, and lively pitch variation — authentic Parisian French on French explanations, effortless natural General American English on English quotes.',
+                },
+              },
+            ],
           },
         ],
         config: {
@@ -1682,7 +1945,7 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
           },
         },
       }),
-      12000,
+      timeoutMs,
       model
     );
 
@@ -1690,10 +1953,49 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     if (!base64Audio) {
       throw new Error(`No audio data returned by ${model}`);
     }
-    // Fast-path: Gemini 3.8 TTS returns complete RIFF WAV ('UklGR' in base64); skip redundant decode/re-encode
-    const wavBase64 = base64Audio.startsWith('UklGR')
-      ? base64Audio
-      : ensureWavFromPcmBuffer(Buffer.from(base64Audio, 'base64'), 24000);
+    return base64Audio;
+  };
+
+  const synthesizeLessonWithGeminiTts = async (
+    model: string,
+    chosenVoice: string,
+    lessonScript: string
+  ): Promise<{ audioBase64: string; modelUsed: string; voiceName: string }> => {
+    const trimmed = lessonScript.trim();
+    const chunks = splitBalancedTtsChunks(trimmed);
+
+    if (chunks.length === 1) {
+      const timeoutMs = Math.max(20000, Math.min(42000, trimmed.length * 35));
+      const base64Audio = await synthesizeTtsChunk(model, chosenVoice, trimmed, timeoutMs);
+      const wavBase64 = base64Audio.startsWith('UklGR')
+        ? base64Audio
+        : ensureWavFromPcmBuffer(Buffer.from(base64Audio, 'base64'), 24000);
+      return {
+        audioBase64: wavBase64,
+        modelUsed: model,
+        voiceName: chosenVoice,
+      };
+    }
+
+    const clipBase64List = await Promise.all(
+      chunks.map((chunk) => {
+        const timeoutMs = Math.max(20000, Math.min(40000, chunk.length * 40));
+        return synthesizeTtsChunk(model, chosenVoice, chunk, timeoutMs);
+      })
+    );
+
+    let outSampleRate = 24000;
+    const pcmParts: Buffer[] = [];
+    clipBase64List.forEach((b64, idx) => {
+      const { pcm, sampleRate } = extractPcmFromWavBuffer(Buffer.from(b64, 'base64'));
+      if (idx === 0 && sampleRate > 0) outSampleRate = sampleRate;
+      if (idx > 0) {
+        pcmParts.push(Buffer.alloc(Math.round(outSampleRate * 0.18) * 2));
+      }
+      pcmParts.push(applyEdgeFadePcm(pcm, outSampleRate, 12));
+    });
+
+    const wavBase64 = ensureWavFromPcmBuffer(Buffer.concat(pcmParts), outSampleRate);
     return {
       audioBase64: wavBase64,
       modelUsed: model,
@@ -1705,7 +2007,28 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     audioBase64: string;
     modelUsed: string;
     voiceName: string;
+    attempts?: string[];
   }
+
+  // Cooldown map skips quota-exhausted models in 0ms instead of burning 1-2s per request waiting on 429
+  const audioModelCooldownUntil = new Map<string, number>();
+  const markAudioModel429Cooldown = (model: string, rawMsg: string) => {
+    const isDailyQuota =
+      rawMsg.includes('PerDay') || msgIncludesFreeTierQuota(rawMsg);
+    const cooldownMs = isDailyQuota ? 10 * 60 * 1000 : 25 * 1000;
+    audioModelCooldownUntil.set(model, Date.now() + cooldownMs);
+  };
+  const msgIncludesFreeTierQuota = (rawMsg: string): boolean =>
+    rawMsg.includes('RequestsPerDay') || rawMsg.includes('FreeTier');
+  const isAudioModelInCooldown = (model: string): boolean => {
+    const until = audioModelCooldownUntil.get(model);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      audioModelCooldownUntil.delete(model);
+      return false;
+    }
+    return true;
+  };
 
   // Short-lived in-flight / completed TTS cache so `evaluate` pre-warms `lesson-audio` without duplicate API calls
   const LESSON_AUDIO_PREFETCH_TTL_MS = 120000;
@@ -1734,25 +2057,43 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
     requestedVoice: string,
     finalScript: string
   ): Promise<AudioSynthResult> => {
+    const synthStart = Date.now();
+    const AUDIO_SYNTH_MAX_BUDGET_MS = 55000;
     const liveVoiceCandidates = Array.from(
       new Set(
         CORE_LIVE_VOICES.has(requestedVoice)
-          ? [requestedVoice, 'Aoede', 'Zephyr']
-          : [requestedVoice, 'Aoede', 'Zephyr']
+          ? [requestedVoice, 'Aoede']
+          : ['Aoede']
       )
     );
 
     let lastErr: any = null;
     let lastErrInfo = { status: 500, shortMsg: 'Erreur génération audio Gemini', rawMsg: '' };
-    let quotaExhausted = false;
+    let saw429 = false;
+    const attempts: string[] = [];
 
-    // 1. Primary (Fast): Gemini TTS models (single fast batch request -> single WAV file)
-    for (const ttsModel of TOPIC_SPEAKING_AUDIO_MODELS.tts) {
+    const activeTtsModels = TOPIC_SPEAKING_AUDIO_MODELS.tts.filter((m) => !isAudioModelInCooldown(m));
+    const activeLiveModels = TOPIC_SPEAKING_AUDIO_MODELS.live.filter((m) => !isAudioModelInCooldown(m));
+    const ttsQueue =
+      activeTtsModels.length > 0
+        ? activeTtsModels
+        : activeLiveModels.length > 0
+          ? []
+          : [...TOPIC_SPEAKING_AUDIO_MODELS.tts].sort(
+              (a, b) => (audioModelCooldownUntil.get(a) || 0) - (audioModelCooldownUntil.get(b) || 0)
+            );
+
+    // 1. Primary (Expressive Flagship TTS first): Gemini TTS models — skip models currently in 429 cooldown
+    for (const ttsModel of ttsQueue) {
+      if (Date.now() - synthStart > AUDIO_SYNTH_MAX_BUDGET_MS) break;
       try {
-        return await synthesizeLessonWithGeminiTts(ttsModel, requestedVoice, finalScript);
+        const res = await synthesizeLessonWithGeminiTts(ttsModel, requestedVoice, finalScript);
+        attempts.push(`${ttsModel}:ok`);
+        return { ...res, attempts };
       } catch (err: any) {
         lastErr = err;
         lastErrInfo = extractLiveErrorInfo(err);
+        attempts.push(`${ttsModel}:${lastErrInfo.status}`);
         console.log(
           `[Lesson Audio] TTS model ${ttsModel} failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
         );
@@ -1763,57 +2104,63 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
           });
         }
         if (lastErrInfo.status === 429) {
-          quotaExhausted = true;
+          saw429 = true;
+          markAudioModel429Cooldown(ttsModel, lastErrInfo.rawMsg);
+        }
+      }
+    }
+
+    // 2. Fallback: Gemini Live native audio (separate model quota from TTS)
+    const liveQueue =
+      activeLiveModels.length > 0
+        ? activeLiveModels
+        : [...TOPIC_SPEAKING_AUDIO_MODELS.live].sort(
+            (a, b) => (audioModelCooldownUntil.get(a) || 0) - (audioModelCooldownUntil.get(b) || 0)
+          );
+
+    for (const liveModel of liveQueue) {
+      if (Date.now() - synthStart > AUDIO_SYNTH_MAX_BUDGET_MS) break;
+      for (const voiceCandidate of liveVoiceCandidates) {
+        if (Date.now() - synthStart > AUDIO_SYNTH_MAX_BUDGET_MS) break;
+        try {
+          const res = await synthesizeLessonWithGeminiLive(liveModel, voiceCandidate, finalScript);
+          attempts.push(`${liveModel}:ok`);
+          return { ...res, attempts };
+        } catch (err: any) {
+          lastErr = err;
+          lastErrInfo = extractLiveErrorInfo(err);
+          const setupSucceeded = Boolean(err?.setupSucceeded);
+          attempts.push(`${liveModel}:${lastErrInfo.status}`);
+          console.log(
+            `[Lesson Audio] Live model ${liveModel} (voice=${voiceCandidate}, setupOk=${setupSucceeded}) failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
+          );
+
+          if (lastErrInfo.status === 403) {
+            throw Object.assign(new Error('Clé API Gemini invalide ou non autorisée.'), {
+              httpStatus: 403,
+              detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
+            });
+          }
+
+          if (lastErrInfo.status === 429) {
+            saw429 = true;
+            markAudioModel429Cooldown(liveModel, lastErrInfo.rawMsg);
+            break;
+          }
+
+          if (!setupSucceeded && lastErrInfo.status === 400) {
+            continue;
+          }
+
           break;
         }
       }
     }
 
-    // 2. Fallback: Gemini Live native audio (if TTS failed and quota wasn't exhausted)
-    if (!quotaExhausted) {
-      for (const liveModel of TOPIC_SPEAKING_AUDIO_MODELS.live) {
-        let stopLiveLoop = false;
-
-        for (const voiceCandidate of liveVoiceCandidates) {
-          try {
-            return await synthesizeLessonWithGeminiLive(liveModel, voiceCandidate, finalScript);
-          } catch (err: any) {
-            lastErr = err;
-            lastErrInfo = extractLiveErrorInfo(err);
-            const setupSucceeded = Boolean(err?.setupSucceeded);
-            console.log(
-              `[Lesson Audio] Live model ${liveModel} (voice=${voiceCandidate}, setupOk=${setupSucceeded}) failed (${lastErrInfo.status}): ${lastErrInfo.shortMsg}`
-            );
-
-            if (lastErrInfo.status === 403) {
-              throw Object.assign(new Error('Clé API Gemini invalide ou non autorisée.'), {
-                httpStatus: 403,
-                detail: `${lastErrInfo.status} ${lastErrInfo.shortMsg}`,
-              });
-            }
-
-            if (lastErrInfo.status === 429) {
-              quotaExhausted = true;
-              stopLiveLoop = true;
-              break;
-            }
-
-            if (!setupSucceeded && lastErrInfo.status === 400) {
-              continue;
-            }
-
-            break;
-          }
-        }
-
-        if (stopLiveLoop) break;
-      }
-    }
-
-    const finalStatus = quotaExhausted || lastErrInfo.status === 429 ? 429 : lastErrInfo.status;
+    const finalStatus = saw429 || lastErrInfo.status === 429 ? 429 : lastErrInfo.status;
     const finalMsg =
       finalStatus === 429
-        ? 'Audio indisponible pour le moment (quota Gemini).'
+        ? 'Quota Gemini gratuit dépassé pour l’audio. Ajoutez une clé API avec facturation dans Settings > Secrets ou réessayez plus tard.'
         : 'Impossible de générer la leçon audio pour le moment.';
     throw Object.assign(new Error(finalMsg), {
       httpStatus: finalStatus,
@@ -1830,6 +2177,8 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
       lessonAudioPrefetchMap.delete(key);
       throw err;
     });
+    // Prevent Node UnhandledPromiseRejection if no request awaits this prefetch before it rejects
+    void promise.catch(() => {});
     lessonAudioPrefetchMap.set(key, { promise, createdAt: Date.now() });
   }
 
@@ -1891,7 +2240,7 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
       );
       const audioMs = Date.now() - lessonStart;
       console.log(
-        `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName}`
+        `[Topic Speaking Timing] lessonAudioMs=${audioMs}ms model=${audioRes.modelUsed} voice=${audioRes.voiceName} attempts=${(audioRes.attempts || []).join(',')}`
       );
 
       // Binary WAV transport eliminates base64 +33% wire inflation and client-side atob decoding loop
@@ -1902,6 +2251,9 @@ Rédige maintenant le script parlé complet du coach, prêt à être lu à voix 
         res.setHeader('X-Lesson-Voice', audioRes.voiceName);
         res.setHeader('X-Lesson-Model', audioRes.modelUsed);
         res.setHeader('X-Lesson-Ms', String(audioMs));
+        if (audioRes.attempts?.length) {
+          res.setHeader('X-Lesson-Attempts', audioRes.attempts.join(','));
+        }
         res.status(200).send(wavBuffer);
         return;
       }
